@@ -1,0 +1,17 @@
+[
+	{
+		"name": "MyAI",
+		"homepage": "http://127.0.0.1:8787",
+		"url": "http://127.0.0.1:8787/answer",
+		"method": "post",
+		"type": "fetch",
+		"responseType": "json",
+		"headers": { "Content-Type": "application/json" },
+		"data": {
+			"title": "${title}",
+			"type": "${type}",
+			"options": "${options}"
+		},
+		"handler": "return (res)=> res && res.ok ? [undefined, res.answer] : undefined"
+	}
+]

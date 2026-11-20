@@ -1,0 +1,14 @@
+{
+	"name": "ocs-answerer",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "OCS 网课脚本的 AI 题库兼容层：收题 → 问 LLM → 返回 OCS 能匹配的答案字符串",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"scripts": {
+		"start": "node src/server.mjs",
+		"test": "node --test"
+	}
+}
