@@ -38,20 +38,28 @@ export function buildRequest(input) {
 		'anthropic-version': ANTHROPIC_VERSION
 	};
 
-	const isOauth = provider.auth === 'oauth' || provider.protocol === 'anthropic-oauth';
+	// auth 与线协议正交：
+	// - api-key（默认）→ x-api-key；
+	// - bearer → Authorization: Bearer，不带任何供应商 beta/指纹头；
+	// - oauth（Claude 订阅）→ Bearer + beta + 可选伪装；
+	// - 旧写法 protocol=anthropic-oauth 等价于 auth=oauth。
+	const auth = provider.auth ?? (provider.protocol === 'anthropic-oauth' ? 'oauth' : 'api-key');
+	const isOauth = auth === 'oauth';
+	const isBearer = isOauth || auth === 'bearer';
 
-	if (isOauth && provider.apiKey) {
-		// 订阅 OAuth：Bearer + 两个 beta 标记，不能再发 x-api-key。
+	if (isBearer && provider.apiKey) {
 		headers.Authorization = `Bearer ${provider.apiKey}`;
-		headers['anthropic-beta'] = ANTHROPIC_OAUTH_BETA;
+		if (isOauth) {
+			headers['anthropic-beta'] = ANTHROPIC_OAUTH_BETA;
 
-		if (provider.impersonate) {
-			// 可选指纹伪装：只有用户显式开启才发，避免向普通网关暴露 Claude Code 身份。
-			headers['x-app'] = 'cli';
-			headers['User-Agent'] =
-				typeof provider.impersonate === 'string'
-					? provider.impersonate
-					: provider.userAgent || DEFAULT_CLAUDE_CODE_USER_AGENT;
+			if (provider.impersonate) {
+				// 可选指纹伪装：只有用户显式开启才发，避免向普通网关暴露 Claude Code 身份。
+				headers['x-app'] = 'cli';
+				headers['User-Agent'] =
+					typeof provider.impersonate === 'string'
+						? provider.impersonate
+						: provider.userAgent || DEFAULT_CLAUDE_CODE_USER_AGENT;
+			}
 		}
 	} else if (provider.apiKey) {
 		headers['x-api-key'] = provider.apiKey;

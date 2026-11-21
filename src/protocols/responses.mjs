@@ -35,9 +35,11 @@ export function buildRequest(input) {
 	const { provider, model, prompt, maxTokens, temperature = 0, signal } = input;
 
 	const accountId = provider.accountId ?? provider.account_id ?? '';
-	const isOauth =
-		provider.auth === 'oauth' || provider.auth === 'codex-oauth' || provider.protocol === 'openai-oauth';
-	if (isOauth && !accountId) {
+	// auth 与线协议正交：只有 Codex 订阅（codex-oauth，或旧写法 protocol=openai-oauth）
+	// 才发 originator / chatgpt-account-id。bearer / api-key 走普通网关，一律不发。
+	const auth = provider.auth ?? (provider.protocol === 'openai-oauth' ? 'codex-oauth' : 'api-key');
+	const isCodexOauth = auth === 'codex-oauth';
+	if (isCodexOauth && !accountId) {
 		// 本地配置问题：不要带着空 header 去换一个 401，直接告诉用户缺什么。
 		throw new ProtocolError(
 			'missing_chatgpt_account_id: Codex OAuth 需要 chatgpt-account-id；' +
@@ -47,12 +49,10 @@ export function buildRequest(input) {
 	}
 
 	/** @type {Record<string, string>} */
-	const headers = {
-		'Content-Type': 'application/json',
-		originator: CODEX_ORIGINATOR
-	};
-	if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
-	if (accountId) headers['chatgpt-account-id'] = accountId;
+	const headers = { 'Content-Type': 'application/json' };
+	if (isCodexOauth) headers.originator = CODEX_ORIGINATOR;
+	if (provider.apiKey && auth !== 'none') headers.Authorization = `Bearer ${provider.apiKey}`;
+	if (isCodexOauth && accountId) headers['chatgpt-account-id'] = accountId;
 
 	const body = {
 		model,

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import * as anthropic from '../src/protocols/anthropic.mjs';
 import * as gemini from '../src/protocols/gemini.mjs';
+import * as responses from '../src/protocols/responses.mjs';
 import { ProtocolError, fetchJson } from '../src/protocols/http.mjs';
 import * as openai from '../src/protocols/openai.mjs';
 
@@ -210,4 +211,103 @@ test('fetchJson：429/5xx/网络错误与 401/403/404 可切换，400 致命；�
 	).catch((error) => error);
 	assert.equal(network.retryable, true);
 	assert.match(network.message, /network_error/);
+});
+
+test('anthropic.buildRequest：auth=bearer 只发 Bearer，不带订阅 beta', () => {
+	const { init } = anthropic.buildRequest({
+		provider: { baseUrl: 'https://gw.test/anthropic/v1', apiKey: 'gw-token', auth: 'bearer' },
+		model: 'claude-x',
+		prompt: PROMPT,
+		maxTokens: 32
+	});
+
+	assert.equal(init.headers.Authorization, 'Bearer gw-token');
+	assert.equal(init.headers['x-api-key'], undefined);
+	assert.equal(init.headers['anthropic-beta'], undefined, '网关不需要订阅 beta');
+});
+
+test('gemini.buildRequest：auth=bearer 用 Authorization，不发 x-goog-api-key', () => {
+	const { init } = gemini.buildRequest({
+		provider: { baseUrl: 'https://gw.test/google/v1beta', apiKey: 'gw-token', auth: 'bearer' },
+		model: 'gemini-x',
+		prompt: PROMPT,
+		maxTokens: 32
+	});
+
+	assert.equal(init.headers.Authorization, 'Bearer gw-token');
+	assert.equal(init.headers['x-goog-api-key'], undefined);
+});
+
+test('responses.buildRequest：auth=bearer 只发 Bearer，不发 Codex 指纹头', () => {
+	const { url, init } = responses.buildRequest({
+		provider: { baseUrl: 'https://gw.test/openai/v1', apiKey: 'gw-token', auth: 'bearer' },
+		model: 'gpt-x',
+		prompt: PROMPT,
+		maxTokens: 32
+	});
+
+	assert.equal(url, 'https://gw.test/openai/v1/responses');
+	assert.equal(init.headers.Authorization, 'Bearer gw-token');
+	assert.equal(init.headers.originator, undefined, 'originator 只属于 Codex 订阅');
+	assert.equal(init.headers['chatgpt-account-id'], undefined);
+
+	const body = JSON.parse(String(init.body));
+	assert.deepEqual(body.input, [{ role: 'user', content: [{ type: 'input_text', text: PROMPT }] }]);
+	assert.equal(body.max_output_tokens, 32);
+	assert.equal(body.temperature, 0);
+});
+
+test('responses.buildRequest：codex-oauth 才发 originator + account id，缺 account id 立即报错', () => {
+	const { init } = responses.buildRequest({
+		provider: {
+			baseUrl: 'https://chatgpt.test/backend-api/codex',
+			apiKey: 'tok',
+			auth: 'codex-oauth',
+			accountId: 'acct-1'
+		},
+		model: 'gpt-5-codex',
+		prompt: PROMPT,
+		maxTokens: 32
+	});
+
+	assert.equal(init.headers.originator, 'codex_cli_rs');
+	assert.equal(init.headers['chatgpt-account-id'], 'acct-1');
+	assert.equal(init.headers.Authorization, 'Bearer tok');
+
+	assert.throws(
+		() =>
+			responses.buildRequest({
+				provider: { baseUrl: 'https://chatgpt.test/backend-api/codex', apiKey: 'tok', auth: 'codex-oauth' },
+				model: 'gpt-5-codex',
+				prompt: PROMPT,
+				maxTokens: 32
+			}),
+		/missing_chatgpt_account_id/
+	);
+});
+
+test('responses.parseResponse：output[] 拼接、output_text 回退、incomplete 视为截断', () => {
+	const parsed = responses.parseResponse({
+		status: 'completed',
+		output: [
+			{ type: 'reasoning', content: [] },
+			{ type: 'message', content: [{ type: 'output_text', text: '1' }, { type: 'output_text', text: ',3' }] }
+		],
+		usage: { input_tokens: 10, output_tokens: 2 }
+	});
+
+	assert.equal(parsed.text, '1,3');
+	assert.equal(parsed.finishReason, 'completed');
+	assert.deepEqual(parsed.usage, { inputTokens: 10, outputTokens: 2 });
+
+	assert.equal(responses.parseResponse({ status: 'completed', output_text: '2' }).text, '2', '网关便捷字段回退');
+
+	assert.throws(
+		() =>
+			responses.parseResponse({
+				status: 'incomplete',
+				incomplete_details: { reason: 'max_output_tokens' }
+			}),
+		/responses_incomplete/
+	);
 });

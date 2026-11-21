@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { DEFAULT_PROVIDERS_FILE, loadConfig, parseProviderChain } from '../src/config.mjs';
 import {
+	AUTH_MODES,
 	PROTOCOLS,
 	loadProviderTable,
 	mergeProviderTables,
@@ -32,7 +33,7 @@ function withTempProviderFiles(presets, local, run) {
 }
 
 test('config/providers.json：protocol 合法、不写 model、keyEnv 为 null 或环境变量名', () => {
-	assert.deepEqual(PROTOCOLS, ['openai', 'anthropic', 'gemini']);
+	assert.deepEqual(PROTOCOLS, ['openai', 'anthropic', 'gemini', 'responses']);
 	assert.deepEqual(Object.keys(PRESETS).sort(), [
 		'anthropic',
 		'deepseek',
@@ -43,7 +44,10 @@ test('config/providers.json：protocol 合法、不写 model、keyEnv 为 null �
 		'minimax',
 		'ollama',
 		'openai',
-		'opencode-go',
+		'opencode-anthropic',
+		'opencode-gemini',
+		'opencode-openai',
+		'opencode-responses',
 		'openrouter'
 	]);
 
@@ -101,12 +105,14 @@ test('provider 校验：预设不能用非法 protocol / 不能写 model；本�
 		/keyEnv/
 	);
 
+	// 旧别名 protocol=anthropic-oauth 仍可使用，但归一化成「规范协议 + 订阅 auth」
 	const oauth = normalizeProvider(
 		'claude-oauth',
 		{ protocol: 'anthropic-oauth', baseUrl: 'https://api.anthropic.com/v1', keyEnv: 'ANTHROPIC_OAUTH_TOKEN' },
 		{ source: 'local' }
 	);
-	assert.equal(oauth.protocol, 'anthropic-oauth');
+	assert.equal(oauth.protocol, 'anthropic');
+	assert.equal(oauth.auth, 'oauth');
 });
 
 test('loadProviderTable：预设 + providers.local.json 合并读取', () => {
@@ -297,7 +303,8 @@ test('resolveProvider：OAuth 只从指定环境变量取 token，且不在预�
 	assert.equal(claude.apiKey, 'oauth-token');
 
 	const codex = resolveProvider('codex-oauth', table, { OPENAI_OAUTH_TOKEN: 'oauth-token-2' });
-	assert.equal(codex.auth, 'oauth');
+	assert.equal(codex.protocol, 'responses');
+	assert.equal(codex.auth, 'codex-oauth');
 	assert.equal(codex.apiKey, 'oauth-token-2');
 });
 
@@ -307,9 +314,21 @@ test('loadConfig：未知 provider / 缺 key / baseUrl 为空 → 启动即报�
 		() => loadConfig({ ANSWERER_CHAIN: 'openai', ANSWERER_MODEL: 'm' }),
 		/缺少环境变量 OPENAI_API_KEY/
 	);
-	assert.throws(
-		() => loadConfig({ ANSWERER_CHAIN: 'opencode-go', ANSWERER_MODEL: 'm', OPENCODE_GO_API_KEY: 'k' }),
-		/baseUrl 为空/
+	// 预设里已没有空 baseUrl 的条目（opencode-* 都填了），用临时预设构造这个场景
+	withTempProviderFiles(
+		{ empty: { label: 'Empty', protocol: 'openai', baseUrl: '', keyEnv: null } },
+		{},
+		(dir) => {
+			assert.throws(
+				() =>
+					loadConfig({
+						ANSWERER_CHAIN: 'empty',
+						ANSWERER_PROVIDERS_FILE: path.join(dir, 'providers.json'),
+						ANSWERER_MODEL: 'm'
+					}),
+				/baseUrl 为空/
+			);
+		}
 	);
 });
 

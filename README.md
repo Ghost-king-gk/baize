@@ -44,19 +44,48 @@ curl -s -X POST 127.0.0.1:8787/answer \
 
 供应商是**数据**：预设表在 [`config/providers.json`](config/providers.json)，本地覆盖放 `config/providers.local.json`（已 gitignore）。四种线格式（openai / anthropic / gemini / responses）都按官方 API 手写：
 
-| id | 协议 | baseUrl | 密钥环境变量 | 需填 model |
-| --- | --- | --- | --- | --- |
-| `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` | 是 |
-| `anthropic` | anthropic | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | 是 |
-| `google` | gemini | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | 是 |
-| `deepseek` | openai | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | 是 |
-| `glm` | openai | `https://open.bigmodel.cn/api/paas/v4` | `ZHIPU_API_KEY` | 是 |
-| `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | 是 |
-| `minimax` | openai | `https://api.minimax.chat/v1` | `MINIMAX_API_KEY` | 是 |
-| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | 是 |
-| `opencode-go` | openai | 空，必须自己填 | `OPENCODE_GO_API_KEY` | 是 |
-| `ollama` | openai | `http://127.0.0.1:11434/v1` | 无（null） | 是 |
-| `lmstudio` | openai | `http://127.0.0.1:1234/v1` | 无（null） | 是 |
+| id | 协议 | auth | baseUrl | 密钥环境变量 | 需填 model |
+| --- | --- | --- | --- | --- | --- |
+| `openai` | openai | `api-key` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | 是 |
+| `anthropic` | anthropic | `api-key` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | 是 |
+| `google` | gemini | `api-key` | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | 是 |
+| `deepseek` | openai | `api-key` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | 是 |
+| `glm` | openai | `api-key` | `https://open.bigmodel.cn/api/paas/v4` | `ZHIPU_API_KEY` | 是 |
+| `kimi` | openai | `api-key` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | 是 |
+| `minimax` | openai | `api-key` | `https://api.minimax.chat/v1` | `MINIMAX_API_KEY` | 是 |
+| `openrouter` | openai | `api-key` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | 是 |
+| `opencode-openai` | openai | `bearer` | `https://opencode.ai/inference/openai/v1` | `OPENCODE_GO_API_KEY` | 是 |
+| `opencode-responses` | responses | `bearer` | `https://opencode.ai/inference/openai/v1` | `OPENCODE_GO_API_KEY` | 是 |
+| `opencode-anthropic` | anthropic | `bearer` | `https://opencode.ai/inference/anthropic/v1` | `OPENCODE_GO_API_KEY` | 是 |
+| `opencode-gemini` | gemini | `bearer` | `https://opencode.ai/inference/google/v1beta` | `OPENCODE_GO_API_KEY` | 是 |
+| `ollama` | openai | `api-key` | `http://127.0.0.1:11434/v1` | 无（null） | 是 |
+| `lmstudio` | openai | `api-key` | `http://127.0.0.1:1234/v1` | 无（null） | 是 |
+
+`protocol` 与 `auth` 是正交的两件事：
+
+| auth | 认证头 | 用途 |
+| --- | --- | --- |
+| `api-key`（缺省） | 供应商原生：anthropic → `x-api-key`，gemini → `x-goog-api-key`，openai/responses → `Authorization: Bearer` | 直连官方 API |
+| `bearer` | 一律 `Authorization: Bearer`，不加任何供应商特有的 beta / 指纹头 | 网关（OpenCode Inference、自建反代） |
+| `oauth` | Bearer + `anthropic-beta: claude-code-20250219,oauth-2025-04-20`，可选指纹伪装 | Claude 订阅，只能写 `providers.local.json` |
+| `codex-oauth` | Bearer + `originator: codex_cli_rs` + `chatgpt-account-id` | Codex 订阅，只能写 `providers.local.json` |
+
+### OpenCode Inference
+
+OpenCode 的 `https://opencode.ai/inference` 同时提供三种协议族，**全部用 Bearer**。一个模型属于哪个族由供应商决定，所以选模型时要选对应的 provider id：
+
+| 模型类型 | 用哪个 id | 实际路径 |
+| --- | --- | --- |
+| 开放模型（kimi / glm / minimax） | `opencode-openai` | `/openai/v1/chat/completions` |
+| GPT 系列 | `opencode-responses` | `/openai/v1/responses` |
+| Claude / Qwen 系列 | `opencode-anthropic` | `/anthropic/v1/messages` |
+| Gemini 系列 | `opencode-gemini` | `/google/v1beta/models/<model>:generateContent` |
+
+```bash
+OPENCODE_GO_API_KEY=... ANSWERER_CHAIN=opencode-openai ANSWERER_MODEL=<模型 id> node src/server.mjs
+```
+
+注意：**免费模型只在 OpenCode 客户端内可用**，第三方客户端即使带 key 也会收到 403；baize 这类外部客户端必须用付费模型或 Go 订阅。每次响应的 `usage` 里会带 `cost` / `opencode.billing_source`，方便核对是不是走的订阅额度。
 
 预设表**绝不写模型 ID**：模型来自全局 `ANSWERER_MODEL`（只适用于单 provider 链），或在 `providers.local.json` 里按 provider 写 `model`。**混合链（`ANSWERER_CHAIN` 多于一家）必须逐家指定 `model`**，否则启动即拒绝，不会拖到第一次请求才发现第二家 404/400：
 

@@ -20,7 +20,7 @@ export function buildRequest(input) {
 
 	/** @type {Record<string, string>} */
 	const headers = { 'Content-Type': 'application/json' };
-	if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
+	if (provider.apiKey && provider.auth !== 'none') headers.Authorization = `Bearer ${provider.apiKey}`;
 
 	/** @type {Record<string, any>} */
 	const body = {

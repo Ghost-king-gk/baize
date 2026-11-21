@@ -19,7 +19,11 @@ export function buildRequest(input) {
 
 	/** @type {Record<string, string>} */
 	const headers = { 'Content-Type': 'application/json' };
-	if (provider.apiKey) headers['x-goog-api-key'] = provider.apiKey;
+	if (provider.apiKey) {
+		// auth=bearer 走网关（如 OpenCode Inference）；缺省 api-key 仍用 Google 原生头。
+		if (provider.auth === 'bearer') headers.Authorization = `Bearer ${provider.apiKey}`;
+		else headers['x-goog-api-key'] = provider.apiKey;
+	}
 
 	const body = {
 		contents: [{ role: 'user', parts: [{ text: prompt }] }],

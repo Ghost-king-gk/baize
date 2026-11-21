@@ -11,17 +11,28 @@ import path from 'node:path';
 
 import { readClaudeOAuth, readCodexOAuth } from './oauth.mjs';
 
-/** 预设表允许的线协议（严格照官方 API）。 */
-export const PROTOCOLS = ['openai', 'anthropic', 'gemini'];
+/** 预设表允许的线协议（严格照官方 API）。`responses` 也走官方 API，只是端点不同。 */
+export const PROTOCOLS = ['openai', 'anthropic', 'gemini', 'responses'];
 
-/** 实验性协议：只允许出现在 providers.local.json，预设表里没有。 */
+/** 实验性协议别名：只允许出现在 providers.local.json，预设表里没有。 */
 export const OAUTH_PROTOCOLS = ['anthropic-oauth', 'openai-oauth'];
 
-/** OAuth 协议对应的 auth 标记；用户可以显式写，也可以省略。 */
+/** 旧协议别名 → auth 标记；用户可以显式写 auth，但必须一致。 */
 export const OAUTH_AUTH_MODES = { 'anthropic-oauth': 'oauth', 'openai-oauth': 'codex-oauth' };
 
-/** providers.local.json 里允许的 auth 取值。 */
-const AUTH_MODES = ['api-key', 'oauth', 'codex-oauth', 'none'];
+/** 旧协议别名 → 规范协议。别名只是历史写法，内部一律按规范协议处理。 */
+const LEGACY_PROTOCOLS = { 'anthropic-oauth': 'anthropic', 'openai-oauth': 'responses' };
+
+/** 所有允许的 auth 取值；缺省是 `api-key`。 */
+export const AUTH_MODES = ['api-key', 'bearer', 'oauth', 'codex-oauth', 'none'];
+
+/**
+ * 订阅类 auth 只能配对应的线协议：
+ * - `oauth` 是 Claude Code 订阅，只对 Anthropic Messages 有意义；
+ * - `codex-oauth` 是 Codex 订阅，只对 Responses 有意义。
+ * `api-key` / `bearer` / `none` 与协议正交，四种协议都能用。
+ */
+const AUTH_PROTOCOL_RESTRICTIONS = { oauth: 'anthropic', 'codex-oauth': 'responses' };
 
 /** @typedef {{
  *   id: string,
@@ -90,14 +101,36 @@ export function normalizeProvider(id, entry, options = {}) {
 		throw new Error(`provider "${id}" 的 protocol 必须是 ${allowed.join('|')}，收到: ${String(entry.protocol)}`);
 	}
 
-	if (entry.auth !== undefined && !AUTH_MODES.includes(entry.auth)) {
-		throw new Error(`provider "${id}" 的 auth 必须是 ${AUTH_MODES.join('|')}，收到: ${String(entry.auth)}`);
+	// 旧写法 protocol=anthropic-oauth/openai-oauth：归一化成规范协议 + 对应订阅 auth。
+	// 显式写了不匹配的 auth 时报错，而不是悄悄改掉用户的意图。
+	const legacyProtocol = OAUTH_AUTH_MODES[/** @type {keyof typeof OAUTH_AUTH_MODES} */ (entry.protocol)];
+	/** @type {string} */
+	let protocol = entry.protocol;
+	/** @type {string | undefined} */
+	let auth = entry.auth;
+	if (legacyProtocol) {
+		if (auth !== undefined && auth !== legacyProtocol) {
+			throw new Error(
+				`provider "${id}" 的 protocol=${entry.protocol} 需要 auth="${legacyProtocol}"，收到: ${String(auth)}`
+			);
+		}
+		auth = legacyProtocol;
+		protocol = LEGACY_PROTOCOLS[/** @type {keyof typeof LEGACY_PROTOCOLS} */ (entry.protocol)];
 	}
-	const expectedAuth = OAUTH_AUTH_MODES[/** @type {keyof typeof OAUTH_AUTH_MODES} */ (entry.protocol)];
-	if (expectedAuth && entry.auth && entry.auth !== expectedAuth) {
+
+	if (auth !== undefined && !AUTH_MODES.includes(auth)) {
+		throw new Error(`provider "${id}" 的 auth 必须是 ${AUTH_MODES.join('|')}，收到: ${String(auth)}`);
+	}
+	auth = auth ?? 'api-key';
+
+	const restrictedProtocol = AUTH_PROTOCOL_RESTRICTIONS[/** @type {keyof typeof AUTH_PROTOCOL_RESTRICTIONS} */ (auth)];
+	if (restrictedProtocol && protocol !== restrictedProtocol) {
 		throw new Error(
-			`provider "${id}" 的 protocol=${entry.protocol} 需要 auth="${expectedAuth}"，收到: ${String(entry.auth)}`
+			`provider "${id}" 的 auth="${auth}" 只能用于 protocol=${restrictedProtocol}，收到: ${protocol}`
 		);
+	}
+	if (source === 'preset' && (auth === 'oauth' || auth === 'codex-oauth')) {
+		throw new Error(`provider 预设 "${id}" 不能使用 auth="${auth}"：订阅凭据只允许写在 providers.local.json`);
 	}
 
 	if (
@@ -129,7 +162,8 @@ export function normalizeProvider(id, entry, options = {}) {
 		...entry,
 		id,
 		label: typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : id,
-		protocol: entry.protocol,
+		protocol,
+		auth,
 		baseUrl: entry.baseUrl.trim().replace(/\/+$/, ''),
 		keyEnv
 	};
@@ -220,8 +254,9 @@ export function resolveProvider(id, table, env, overrides = {}) {
 		throw new Error(`未知 provider "${id}"。可用: mock, ${known}（自定义请写 config/providers.local.json）`);
 	}
 
-	const protocol = entry.protocol;
-	const isOauth = OAUTH_PROTOCOLS.includes(protocol);
+	const auth = entry.auth ?? OAUTH_AUTH_MODES[/** @type {keyof typeof OAUTH_AUTH_MODES} */ (entry.protocol)] ?? 'api-key';
+	const protocol = LEGACY_PROTOCOLS[/** @type {keyof typeof LEGACY_PROTOCOLS} */ (entry.protocol)] ?? entry.protocol;
+	const isSubscription = auth === 'oauth' || auth === 'codex-oauth';
 	const baseUrl = String(overrides.baseUrl || entry.baseUrl || '')
 		.trim()
 		.replace(/\/+$/, '');
@@ -239,26 +274,37 @@ export function resolveProvider(id, table, env, overrides = {}) {
 	/** @type {string | null} */
 	let accountId = null;
 
-	if (isOauth) {
+	if (isSubscription) {
 		// 显式环境变量 > Claude Code / Codex 的本地凭据文件；具体错误由 oauth.mjs 给出。
-		const credentials =
-			protocol === 'anthropic-oauth' ? readClaudeOAuth({ env }) : readCodexOAuth({ env });
+		const credentials = auth === 'oauth' ? readClaudeOAuth({ env }) : readCodexOAuth({ env });
 		if (!apiKey) apiKey = credentials.token;
-		if (protocol === 'openai-oauth') accountId = credentials.accountId ?? null;
+		if (auth === 'codex-oauth') {
+			accountId = /** @type {{accountId?: string | null}} */ (credentials).accountId ?? null;
+		}
+	} else if (auth === 'none') {
+		// 本地服务显式声明无需鉴权：即使环境里恰好有同名变量也不发。
+		apiKey = '';
 	} else if (!apiKey && entry.keyEnv) {
 		apiKey = String(env[entry.keyEnv] ?? '').trim();
 	}
 
-	if (!apiKey && entry.keyEnv) {
+	if (!apiKey && auth === 'bearer') {
+		throw new Error(
+			`provider "${id}" 的 auth=bearer 需要 API key：请设置 ${entry.keyEnv ?? 'ANSWERER_API_KEY'}（或 ANSWERER_API_KEY）`
+		);
+	}
+	if (!apiKey && entry.keyEnv && auth !== 'none') {
 		throw new Error(`provider "${id}" 缺少环境变量 ${entry.keyEnv}`);
 	}
 
 	return {
 		...entry,
+		protocol,
 		model,
 		baseUrl,
 		apiKey,
-		auth: isOauth ? 'oauth' : apiKey ? 'api-key' : 'none',
+		// 显式 auth 原样保留；api-key 没拿到 key 时降级为 none，协议适配器据此跳过认证头。
+		auth: isSubscription || auth === 'none' ? auth : apiKey ? auth : 'none',
 		...(accountId ? { accountId } : {})
 	};
 }
