@@ -21,13 +21,9 @@
 
 <br>
 
-<table>
-<tr>
-<td align="center" width="33%"><h3>0</h3><sub>运行时依赖<br><code>node:http</code> 就是全部</sub></td>
-<td align="center" width="33%"><h3>4</h3><sub>线协议<br>OpenAI · Anthropic · Responses · Gemini</sub></td>
-<td align="center" width="33%"><h3>1</h3><sub>个进程<br>没有数据库、没有队列、没有守护</sub></td>
-</tr>
-</table>
+<div align="center">
+<img src="assets/stats.svg" alt="0 运行时依赖 · 4 线协议 · 1 进程" width="860">
+</div>
 
 ---
 
