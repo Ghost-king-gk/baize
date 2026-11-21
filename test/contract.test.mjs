@@ -41,6 +41,10 @@ test('OCS handler：ok:true → [undefined, answer]；ok:false → undefined', (
 	assert.equal(handler({}), undefined);
 });
 
-test('README 第一行是兼容性声明', () => {
-	assert.equal(readme.split('\n')[0], '兼容 ocsjs 5.4.2 @ 09628b7');
+test('README 声明了与 COMPAT 一致的兼容版本', () => {
+	// 顶部是 banner，但兼容版本必须显式出现：改了 src/server.mjs 的 COMPAT
+	// 而忘了改 README，这条测试会立刻失败。
+	const compat = /export const COMPAT = '([^']+)'/.exec(readFileSync(new URL('src/server.mjs', root), 'utf8'))?.[1];
+	assert.ok(compat, 'src/server.mjs 里找不到 COMPAT 常量');
+	assert.ok(readme.includes(`兼容 ${compat}`), `README 必须出现「兼容 ${compat}」`);
 });

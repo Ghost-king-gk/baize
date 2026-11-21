@@ -1,34 +1,120 @@
-兼容 ocsjs 5.4.2 @ 09628b7
+<div align="center">
 
-# baize · 白泽
+<img src="assets/banner.svg" alt="baize · 白泽" width="860">
 
-> 《山海经》里的白泽「知万物之情」，能言人语。这个服务做的是同一件事：听懂题目，给出人话的答案。
+<br>
 
-OCS（网课助手）的 **AI 题库兼容层**。它自己不做题库，只做三件事：
+<a href="https://github.com/Ghost-king-gk/baize/stargazers"><img src="https://img.shields.io/github/stars/Ghost-king-gk/baize?style=flat-square&color=35C2A8&label=stars" alt="stars"></a>
+<img src="https://img.shields.io/badge/license-MIT-35C2A8?style=flat-square" alt="license">
+<img src="https://img.shields.io/badge/node-%E2%89%A522-4EA1FF?style=flat-square" alt="node">
+<img src="https://img.shields.io/badge/dependencies-0-8B7CF6?style=flat-square" alt="dependencies">
+<img src="https://img.shields.io/badge/tests-129%20passing-35C2A8?style=flat-square" alt="tests">
+<img src="https://img.shields.io/badge/ocsjs-5.4.2-8B929C?style=flat-square" alt="ocsjs">
 
-1. 接住 OCS 发来的 `POST /answer`（题干 + 题型 + 选项）；
-2. 按 `ANSWERER_CHAIN` 依次问 OpenAI / Anthropic / Google（或任意 OpenAI 兼容网关）的 LLM，只让它输出选项序号；
-3. 把序号翻译回 **OCS 匹配器认得的答案字符串**（选项原文 / `#` 分隔 / 判断题词表 token）。
+<br><br>
 
-零运行时依赖，只用 Node 内置模块（`node:http`、`node:test`、全局 `fetch`），没有 `npm install` 步骤。
+**把 OCS 的「题库」协议，翻译成任意 LLM 的答案。**
+
+<sub>零依赖 · 单文件看板 · 只绑回环 · 支持 Claude / ChatGPT 订阅与 OpenCode Go</sub>
+
+</div>
+
+<br>
+
+<table>
+<tr>
+<td align="center" width="33%"><h3>0</h3><sub>运行时依赖<br><code>node:http</code> 就是全部</sub></td>
+<td align="center" width="33%"><h3>4</h3><sub>线协议<br>OpenAI · Anthropic · Responses · Gemini</sub></td>
+<td align="center" width="33%"><h3>1</h3><sub>个进程<br>没有数据库、没有队列、没有守护</sub></td>
+</tr>
+</table>
+
+---
+
+## 它是什么
+
+OCS（网课助手）把「题库」当成一个**外部 HTTP 服务**：发一道题，拿回一个字符串。
+所以它不需要题库，只需要一个说它方言的东西。
+
+baize 就是这个东西：**收题 → 问模型 → 把模型的选择映射回题目里的选项原文**。
+
+```mermaid
+flowchart LR
+    A["OCS 用户脚本<br/><sub>浏览器</sub>"] -->|"POST /answer<br/>title · type · options"| B["baize<br/><sub>127.0.0.1:8787</sub>"]
+    B --> C{"模型目录<br/>按 model 解析"}
+    C -->|"chat-completions"| D["OpenAI 兼容<br/><sub>DeepSeek · GLM · Kimi · Ollama</sub>"]
+    C -->|"messages"| E["Anthropic<br/><sub>Claude 订阅</sub>"]
+    C -->|"responses"| F["OpenAI Responses<br/><sub>Codex 订阅</sub>"]
+    C -->|"generate-content"| G["Gemini<br/><sub>API key</sub>"]
+    D --> H["答案字符串<br/><sub>选项原文 / # 分隔 / 判断词表</sub>"]
+    E --> H
+    F --> H
+    G --> H
+    H -->|"ok: true"| A
+
+    style B fill:#12151A,stroke:#35C2A8,stroke-width:2px,color:#E6E8EB
+    style C fill:#12151A,stroke:#4EA1FF,color:#E6E8EB
+    style H fill:#12151A,stroke:#E0A458,color:#E6E8EB
+```
+
+## 它不是什么
+
+| | |
+| --- | --- |
+| ❌ 不是题库网站 | 没有题目数据，也不需要。只负责把题转给模型 |
+| ❌ 不是浏览器扩展 | 是一个本地 HTTP 服务，浏览器只跟它说话 |
+| ❌ 不是 OCS 的分支 | 不改 OCS 一行代码，升级 OCS 不用重新适配 |
+| ❌ 不是云服务 | 只监听 `127.0.0.1`，不出本机。你要自己填 key |
+
+---
 
 ## 一分钟启动
 
-要求 Node.js **22+**（`node -v` 确认）；零依赖，不需要 `npm install`。
+<details open>
+<summary><b>Docker（最省事）</b></summary>
 
 ```bash
 git clone https://github.com/Ghost-king-gk/baize.git && cd baize
 cp .env.example .env          # 填 OPENCODE_GO_API_KEY
+docker compose up -d --build
+```
+
+只发布 `127.0.0.1:8787`。详见 [docs/docker.md](docs/docker.md)。
+</details>
+
+<details>
+<summary><b>Windows（免安装 Node）</b></summary>
+
+```powershell
+git clone https://github.com/Ghost-king-gk/baize.git; cd baize
+powershell -ExecutionPolicy Bypass -File scripts\win-portable.ps1
+copy .env.example .env
+notepad .env                  # 填 key
+scripts\start.bat
+```
+
+`win-portable.ps1` 会把 `node.exe` 下到 `runtime\`，系统里不用装 Node。详见 [docs/windows.md](docs/windows.md)。
+</details>
+
+<details>
+<summary><b>Linux / macOS（源码）</b></summary>
+
+```bash
+git clone https://github.com/Ghost-king-gk/baize.git && cd baize
+cp .env.example .env
 node src/server.mjs
 ```
 
-看到这一行就成功了：
+要求 Node ≥ 22。
+</details>
 
-```
-[baize] listening on http://127.0.0.1:8787  chain=opencode-go  model=...  k=3
+看到这一行就算起来了：
+
+```text
+[baize] listening on http://127.0.0.1:8787  chain=opencode-go  model=glm-5.3-flash  k=3
 ```
 
-冒烟测试：
+自检：
 
 ```bash
 curl -s -X POST 127.0.0.1:8787/answer \
@@ -37,63 +123,77 @@ curl -s -X POST 127.0.0.1:8787/answer \
 # {"ok":true,"answer":"C. 3"}
 ```
 
-- **Windows**：[docs/windows.md](docs/windows.md)（免安装运行时、`start.bat`、开机自启、常见问题）
-- **Docker**：[docs/docker.md](docs/docker.md)（`docker compose up -d --build`）
-- **管理页**：启动后打开 <http://127.0.0.1:8787/>（状态 / 看板 / 只读配置）
-- **接入 OCS**：把 [`contract/answerer.json`](contract/answerer.json) 的内容贴进面板的「题库配置」
-- **看额度与耗时**：`node tools/dashboard.mjs` 生成 `dashboard.html`，见 [docs/dashboard.md](docs/dashboard.md)
-- **不联网先试**：`ANSWERER_PROVIDER=mock ANSWERER_MOCK_LETTERS=3 node src/server.mjs`（固定回答第 3 个选项）
+> 不想联网：`ANSWERER_PROVIDER=mock ANSWERER_MOCK_LETTERS=3 node src/server.mjs`，固定回答第 3 个选项。
+
+---
+
+## 接进 OCS
+
+打开网课页面 → OCS 面板 → `⚙️ 全局设置` → `题库配置` → 自定义 → 粘贴 [`contract/answerer.json`](contract/answerer.json)：
+
+```json
+[
+  {
+    "name": "白泽",
+    "homepage": "http://127.0.0.1:8787",
+    "url": "http://127.0.0.1:8787/answer",
+    "method": "post",
+    "type": "fetch",
+    "responseType": "json",
+    "headers": { "Content-Type": "application/json" },
+    "data": { "title": "${title}", "type": "${type}", "options": "${options}" },
+    "handler": "return (res)=> res && res.ok ? [undefined, res.answer] : undefined"
+  }
+]
+```
+
+> `type: "fetch"` 是刻意的：本地回环被浏览器视作安全源，**不需要**在脚本元信息里加 `@connect`。
+> `[undefined, answer]` 是官方支持写法——题目留空，OCS 自动回填当前题干。
+
+---
+
+## 答案格式：真正容易做错的地方
+
+OCS 的匹配器不是「读懂答案」，是**字符串匹配**。所以服务返回什么，决定了它能不能选中。
+
+| 题型 | 必须返回 | 依据 |
+| --- | --- | --- |
+| `single` | 选中选项的**原文**（含 `A.` 前缀） | `resolvers/single.ts:27` 先归一化匹配再相似度；两侧同过 `removeRedundant`（`utils/string.ts:250`），前缀对称剥离 |
+| `multiple` | 多个选项原文，`#` 连接 | `resolvers/multiple.ts:42`；分隔符全集 `['===','#','---','###','|',';','；']`（`worker/utils.ts:139`） |
+| `judgement` | **词表 token**（`对/错/正确/错误/√/×/true/1`），不能带 `A.` 前缀 | `resolvers/judgement.ts:9-29` 定义词表，`:40` 做整串相等：`A. 正确` 归一化后是 `a正确`，匹配不上 |
+| `completion` | `#` 连接，按空位顺序 | `resolvers/completion.ts:19` 用 `splitAnswer` 切分后依次填 |
+
+**让模型只输出序号，再由代码映射回请求里的选项原文** —— 让模型复述选项等于把 0.6 相似度阈值当赌注。
+
+- 绝不返回 `A`/`B` 纯字母（那会走 `plainOptions` 兜底，优先级更低）
+- 判断题的 token 必须来自**选项自身**：选项是 `√` 就返回 `√`，返回 `正确` 匹配不上
+- 填空答案里出现 `#` 或 `===` 会破坏切分 → 直接弃权
+
+> 任何一环不可靠就返回 `ok:false`，OCS 走「搜不到」。**弃权优于猜错**：猜错的答案会被写进 DOM，甚至被交卷。
+
+---
 
 ## 多 provider 与故障转移
 
-供应商是**数据**：预设表在 [`config/providers.json`](config/providers.json)，本地覆盖放 `config/providers.local.json`（已 gitignore）。四种线格式（openai / anthropic / gemini / responses）都按官方 API 手写：
+供应商是**数据**：预设表在 [`config/providers.json`](config/providers.json)，本地覆盖放 `config/providers.local.json`（已 gitignore）。
 
-| id | 协议 | auth | baseUrl | 密钥环境变量 | 需填 model |
-| --- | --- | --- | --- | --- | --- |
-| `openai` | openai | `api-key` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | 是 |
-| `anthropic` | anthropic | `api-key` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | 是 |
-| `google` | gemini | `api-key` | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | 是 |
-| `deepseek` | openai | `api-key` | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | 是 |
-| `glm` | openai | `api-key` | `https://open.bigmodel.cn/api/paas/v4` | `ZHIPU_API_KEY` | 是 |
-| `kimi` | openai | `api-key` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | 是 |
-| `minimax` | openai | `api-key` | `https://api.minimax.chat/v1` | `MINIMAX_API_KEY` | 是 |
-| `openrouter` | openai | `api-key` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | 是 |
-| `ollama` | openai | `api-key` | `http://127.0.0.1:11434/v1` | 无（null） | 是 |
-| `lmstudio` | openai | `api-key` | `http://127.0.0.1:1234/v1` | 无（null） | 是 |
-| `opencode` | 目录 | `bearer` | 运行时从 `catalog.url` 解析 | `OPENCODE_GO_API_KEY` | 是 |
-| `opencode-go` | 目录 | `bearer` | 运行时从 `catalog.url` 解析 | `OPENCODE_GO_API_KEY` | 是 |
+| id | 协议 | auth | 需要什么 |
+| --- | --- | --- | --- |
+| `openai` / `deepseek` / `glm` / `kimi` / `minimax` / `openrouter` | openai | `api-key` | 各家 key |
+| `anthropic` | anthropic | `api-key` | `ANTHROPIC_API_KEY` |
+| `google` | gemini | `api-key` | `GEMINI_API_KEY` |
+| `opencode` / `opencode-go` | 目录驱动 | `bearer` | `OPENCODE_GO_API_KEY` |
+| `ollama` / `lmstudio` | openai | 无 | 本地服务 |
 
-`protocol` 与 `auth` 是正交的两件事：
+`protocol` 与 `auth` 正交：`api-key` 用供应商原生头（`x-api-key` / `x-goog-api-key` / Bearer），`bearer` 一律 `Authorization: Bearer` 且不加任何供应商特有的 beta / 指纹头。
 
-| auth | 认证头 | 用途 |
-| --- | --- | --- |
-| `api-key`（缺省） | 供应商原生：anthropic → `x-api-key`，gemini → `x-goog-api-key`，openai/responses → `Authorization: Bearer` | 直连官方 API |
-| `bearer` | 一律 `Authorization: Bearer`，不加任何供应商特有的 beta / 指纹头 | 网关（OpenCode Inference、自建反代） |
-| `oauth` | Bearer + `anthropic-beta: claude-code-20250219,oauth-2025-04-20`，可选指纹伪装 | Claude 订阅，只能写 `providers.local.json` |
-| `codex-oauth` | Bearer + `originator: codex_cli_rs` + `chatgpt-account-id` | Codex 订阅，只能写 `providers.local.json` |
+### 目录驱动：OpenCode 不用填 baseUrl
 
-### OpenCode Inference（目录驱动，零 baseUrl 配置）
-
-OpenCode 的模型列表接口自带每个模型该用哪种 API。`GET` 一下就能看到（认证是 `Authorization: Bearer <key>`）：
+模型列表接口自带每个模型该用哪种 API（`api` 键 + `base_url`），所以 baize 在运行时拉目录、按模型 id 反查：
 
 ```bash
-curl -H "Authorization: Bearer $OPENCODE_GO_API_KEY" https://opencode.ai/inference/go/v1/models
+ANSWERER_CHAIN=opencode-go ANSWERER_MODEL=glm-5.3-flash node src/server.mjs
 ```
-
-`data[]` 里每个模型有 `id` / `type` / `api`，`api` 里带该模型的 `base_url`。baize 在**运行时**拉这份目录，用模型 id 反查协议和地址，所以用户只需要填模型 id：
-
-```bash
-OPENCODE_GO_API_KEY=... ANSWERER_CHAIN=opencode-go ANSWERER_MODEL=claude-haiku-5-5 node src/server.mjs
-```
-
-不需要填 `baseUrl` / `protocol`。支持两个目录，密钥都是 `OPENCODE_GO_API_KEY`：
-
-| provider id | 目录地址 | 计费方式 |
-| --- | --- | --- |
-| `opencode` | `https://opencode.ai/inference/v1/models` | OpenCode Models，按额度 |
-| `opencode-go` | `https://opencode.ai/inference/go/v1/models` | OpenCode Go 订阅 |
-
-目录 `api` 键 → 本项目协议：
 
 | `api` 键 | protocol | 最终请求 |
 | --- | --- | --- |
@@ -102,365 +202,266 @@ OPENCODE_GO_API_KEY=... ANSWERER_CHAIN=opencode-go ANSWERER_MODEL=claude-haiku-5
 | `messages` | `anthropic` | `{base_url}/messages` |
 | `generate-content` | `gemini` | `{base_url}/models/<model>:generateContent` |
 
-解析规则：
+- 只认这四个键，过滤后**恰好剩一个**才用；剩 0 个或 ≥2 个都报错，不猜
+- 目录缓存 10 分钟，按 URL 复用实例；拉取失败算「可切换错误」，模型不存在算配置错误
+- 必须带 `x-opencode-session`（缺了 400 `MissingSessionID`），预设已用 `${session}` 占位符自动生成
+- 免费模型只在 OpenCode 客户端内可用，第三方 403；必须用付费模型或 Go 订阅
 
-- 只认这四个键，`interactions` 等其它键一律忽略。过滤后**恰好剩一个**才用。
-- 剩 0 个（例如某模型只有 `interactions`）→ 报错并列出实际键名，不会瞎猜。
-- 剩 2 个及以上 → 报「歧义」，请在 `config/providers.local.json` 里另建一个条目、显式写 `protocol` + `baseUrl`。
-- 只有 `type: "chat"` 的模型能用于问答，其它 type 直接报错。
-- 目录在进程内缓存 **10 分钟**（按目录 URL 复用同一个实例），过期或重启后重新拉取；不落盘。
-- 目录拉取失败（网络、超时、5xx、非 JSON）算**可切换错误**：该 provider 被跳过，继续故障转移链；模型不存在或 `api` 结构不对算配置错误，立即失败。任何情况下都不会静默用错地址。
+### 故障转移
 
-**必须带 `x-opencode-session`**：OpenCode Go 用它做路由与 prompt 缓存，缺了会直接 400 `MissingSessionID`。两个预设已经带了这个头（值由进程启动时生成，`${session}` 占位符），你不需要手写：
+```mermaid
+sequenceDiagram
+    autonumber
+    participant O as OCS
+    participant B as baize
+    participant P as provider
 
-```json
-"opencode-go": {
-  "catalog": { "url": "https://opencode.ai/inference/go/v1/models" },
-  "keyEnv": "OPENCODE_GO_API_KEY",
-  "headers": { "x-opencode-session": "${session}" }
-}
+    O->>B: POST /answer
+    B->>B: 解析选项 / 推断题型
+    alt 首次请求
+        B->>P: GET /models
+        P-->>B: api + base_url
+    end
+    B->>P: POST（解析后的地址）
+    P-->>B: 200 + usage(cost / allowance)
+    alt 401 · 403 · 404 · 402 · 429 · 5xx · 超时
+        B->>P: 换下一家（计入熔断）
+    end
+    B-->>O: {"ok":true,"answer":"C. 3"}
 ```
-
-另外每个请求都会带 `User-Agent: baize/0.1.0`（Go 要求客户端自报身份，不要用通用 SDK 名）。
-
-**免费模型只在 OpenCode 客户端内可用**：其他客户端即使带 key 也会收到 403。baize 属于外部客户端，必须用付费模型或 Go 订阅。每次响应的 `usage` 里带 `cost` 与 `opencode.billing_source`，可以直接核对是不是走的订阅额度（`go` / `go-plus`）。
-
-Go 的额度按模型分档（月额度，美元）：`glm-5.3` 500、`deepseek-v4.1-flash` 100、`glm-5.3-flash` 60、`gemini-4-argon` 30、`claude-haiku-5-5` / `kimi-k3` 15。所以推荐用链：快的放前面，额度大的放后面兜底。
-
-预设表**绝不写模型 ID**：模型来自全局 `ANSWERER_MODEL`（只适用于单 provider 链），或在 `providers.local.json` 里按 provider 写 `model`。**混合链（`ANSWERER_CHAIN` 多于一家）必须逐家指定 `model`**，否则启动即拒绝，不会拖到第一次请求才发现第二家 404/400：
-
-```
-provider "deepseek" 缺少 model；混合链必须逐家指定。在 config/providers.local.json 里加：
-  { "deepseek": { "model": "<该供应商的模型 id>" } }
-```
-
-`ANSWERER_CHAIN` 是逗号分隔的 provider id，按顺序尝试；未设置时退回 `ANSWERER_PROVIDER`（兼容旧的单 provider 配置）：
-
-```bash
-# 各家的模型名不同：在 config/providers.local.json 里按 provider 写 model
-ANSWERER_CHAIN=openai,deepseek node src/server.mjs
-```
-
-故障转移语义：
 
 | 情况 | 行为 |
 | --- | --- |
-| 网络错误、超时、HTTP 408 / 429 / 5xx、响应不是 JSON | 记一次失败，换下一家 |
-| HTTP 402（订阅额度 / 余额耗尽） | 同样换下一家：额度问题不该让整题失败 |
-| HTTP 401 / 403 / 404（key 过期、无权限、模型/路径不存在） | 同样换下一家，日志打独立的 `provider_auth_failed`；也计入熔断 |
-| HTTP 400 及其余 4xx | **立即抛出**，不继续烧别家额度 |
-| HTTP 2xx 但内容截断 / 空输出 / 序号非法 | 不切下一家（供应商已经应答），按 `invalid_output` 重试一次 |
-| 单 provider 连续失败 3 次（含 401/403/404） | 进程内熔断 60 秒，期间直接跳过；冷却后自动放行 |
+| 网络错误、超时、408 / 429 / 5xx、响应不是 JSON | 记一次失败，换下一家 |
+| 401 / 403 / 404 / **402** | 同样换下一家（key 过期、模型不存在、额度耗尽） |
+| 400 及其余 4xx | **立即抛出**，不继续烧别家额度 |
+| 2xx 但内容截断 / 空输出 / 序号非法 | 不切下一家（供应商已应答），按 `invalid_output` 重试一次 |
+| 单 provider 连续失败 3 次 | 进程内熔断 60 秒，冷却后自动放行 |
 
-切换日志只打印 provider id + 状态码，不打印 key / 请求体：
-
-```
+```text
 [baize] provider=openai status=429 -> fallback=deepseek
 [baize] provider=openai status=401 provider_auth_failed -> fallback=deepseek
-[baize] provider=deepseek status=network -> fallback=mock
 [baize] provider=openai circuit=open
 ```
 
-`/health` 返回当前链：`{"ok":true,"service":"baize","compat":"...","provider":"openai","chain":["openai","deepseek"],"model":"..."}`。
+> **混合链必须逐家写 model**（不同供应商模型名不同），否则启动即拒绝，不会拖到第一次请求才发现第二家 404。
 
-### 自定义 provider
+<details>
+<summary><b>自定义 provider / 订阅 OAuth</b></summary>
 
-在 `config/providers.local.json` 里写 JSON 对象，按 id **浅合并**到预设表（用户值优先），可以直接改写预设，也可以追加新网关：
-
-```json
-{
-	"openai": {
-		"baseUrl": "https://my-proxy.example.com/v1",
-		"keyEnv": "MY_PROXY_KEY",
-		"model": "gpt-4.1-mini"
-	},
-	"my-gateway": {
-		"label": "我的网关",
-		"protocol": "openai",
-		"baseUrl": "https://gateway.example.com/v1",
-		"keyEnv": "MY_GATEWAY_API_KEY",
-		"model": "some-model"
-	}
-}
-```
-
-然后把 `my-gateway` 加进 `ANSWERER_CHAIN`。常规供应商的 `protocol` 只能是 `openai` / `anthropic` / `gemini`（OAuth 两种见下）；`keyEnv: null` 表示本地服务无需鉴权；`baseUrl` 留空会在启动时报错，而不是悄悄请求错误地址。
-
-### 订阅 OAuth（实验性，默认关闭）
-
-预设表里**没有** OAuth 供应商，只有你显式写进 `config/providers.local.json` 才会启用。它们直接读取已经登录的 Claude Code / Codex 凭据，用订阅额度调 API，不需要 API key。
-
-#### Claude Code（Anthropic Messages API）
+在 `config/providers.local.json` 里按 id 浅合并到预设表：
 
 ```json
 {
-	"claude-oauth": {
-		"label": "Claude 订阅（Claude Code）",
-		"protocol": "anthropic-oauth",
-		"auth": "oauth",
-		"baseUrl": "https://api.anthropic.com/v1",
-		"keyEnv": null,
-		"model": "<你的 Claude 订阅模型 id>",
-		"impersonate": false
-	}
+  "my-gateway": {
+    "label": "我的网关",
+    "protocol": "openai",
+    "baseUrl": "https://gateway.example.com/v1",
+    "keyEnv": "MY_GATEWAY_API_KEY",
+    "model": "some-model"
+  }
 }
 ```
 
-- 请求头：`Authorization: Bearer <token>`（**不再发** `x-api-key`）、`anthropic-version: 2023-06-01`、`anthropic-beta: claude-code-20250219,oauth-2025-04-20`。两个 beta 标记都发，顺序固定。
-- 凭据优先级：环境变量 `ANTHROPIC_OAUTH_TOKEN` → `~/.claude/.credentials.json` 的 `claudeAiOauth.accessToken`。
-- `claudeAiOauth.expiresAt` 是毫秒时间戳；已过期会在启动时直接报错，并提示重新运行 `claude setup-token`，不会带着死 token 去换 401。
-- `impersonate` 默认 `false`。设为 `true` 时额外发送 `x-app: cli` 和 Claude Code 风格的 `User-Agent`（默认 `claude-cli/1.0.0 (external, cli)`），并在 prompt 最前面注入一行 `You are Claude Code, Anthropic's official CLI for Claude.`，后接两个换行再接原 prompt。也可以把 `impersonate` 直接写成自定义 User-Agent 字符串，例如 `"impersonate": "claude-cli/2.0.0 (external, cli)"`。
+**Claude 订阅**（`auth: oauth`）：Bearer + `anthropic-version: 2023-06-01` + `anthropic-beta: claude-code-20250219,oauth-2025-04-20`；凭据取 `~/.claude/.credentials.json` 的 `claudeAiOauth.accessToken`，过期会启动即报错。`impersonate: true` 时额外发 `x-app: cli` 与 Claude Code UA，并在 prompt 首行注入身份声明。
 
-#### Codex（OpenAI Responses API）
+**Codex 订阅**（`auth: codex-oauth`）：走 Responses API，Bearer + `chatgpt-account-id`（JWT claim `https://api.openai.com/auth.chatgpt_account_id`）+ `originator: codex_cli_rs`；凭据取 `~/.codex/auth.json`。
 
-```json
-{
-	"codex-oauth": {
-		"label": "ChatGPT 订阅（Codex）",
-		"protocol": "openai-oauth",
-		"auth": "codex-oauth",
-		"baseUrl": "https://chatgpt.com/backend-api/codex",
-		"keyEnv": null,
-		"model": "<你的 Codex 模型 id>"
-	}
-}
+**风险自负**：这类 token 属于订阅客户端，第三方调用可能违反供应商条款，也可能随时被吊销。**Gemini 没有等价路径**——公开 SDK 只有 API key 与 Vertex，CLI 的 OAuth 走 Code Assist 内部端点，所以不实现。订阅模式未在真实账号上联调过。
+</details>
+
+---
+
+## 额度与看板
+
+<img src="assets/preview.svg" alt="看板预览" width="880">
+
+> 上图由真实看板生成器输出（示例数据：626 题 / 3 个模型 / 5 天）。
+
+```bash
+node tools/quota.mjs       # 刷新 Go 各模型月额度（无需 key）
+node tools/dashboard.mjs   # 生成 dashboard.html，浏览器直接打开
 ```
 
-- 端点固定 `POST {baseUrl}/responses`，走 Responses API，**不是** `chat/completions`。
-- 请求头：`Authorization: Bearer <token>`、`chatgpt-account-id: <account_id>`、`originator: codex_cli_rs`。
-- 请求体：`input: [{ role: "user", content: [{ type: "input_text", text: "<prompt>" }] }]`，配 `max_output_tokens` 与 `temperature: 0`。
-- 响应解析：优先收集 `output[].content[]` 里 `type === "output_text"` 的 `text`；为空时回退便捷字段 `output_text`。`status === "incomplete"` 或 `incomplete_details.reason === "max_output_tokens"` 一律按截断处理（`invalid_output`），不会把半截答案交给 OCS。
-- 凭据优先级：`OPENAI_OAUTH_TOKEN`（可选 `OPENAI_ACCOUNT_ID`）→ `~/.codex/auth.json` 的 `tokens.access_token` / `tokens.account_id`。文件里没有 account_id 时，从 JWT 的 `https://api.openai.com/auth.chatgpt_account_id` 解。
-- JWT 解析只做 base64url decode，**不校验签名**（baize 不是签发方）。结构不对或 payload 不是 JSON 时会报出具体原因；如果用的是不透明 token，请显式设置 `OPENAI_ACCOUNT_ID`。
+- **`allowance` 才是额度**：Go 订阅内 `cost` 恒为 `0`，真正计入月度上限的是 `usage.opencode.allowance`
+- **空值不是 0**：`cost: null` 表示没有数据，`cost: 0` 表示订阅内免费
+- 额度条 ≥80% 转琥珀、≥100% 转红；没有额度表就显示「无额度表」，不编造上限
 
-#### 凭据错误与日志
+服务运行时还有四个入口：
 
-凭据读取会把「文件不存在」「无权限」「JSON 损坏」「字段缺失」「token 已过期」分开报错，并给出对应的登录命令提示。OAuth token 只存在于内存中的 provider 配置里，不写盘、不进日志；故障转移日志仍然只打印 provider id 与状态码，不打印 token、请求头或请求体。
+| 路径 | 内容 |
+| --- | --- |
+| `/` | 状态、链路、模型、最近 10 条答题 |
+| `/dashboard` | 上面那张看板，实时生成 |
+| `/settings` | **只读**配置：环境变量（key 只露前 4 位）+ 可复制的 OCS 题库配置 |
+| `/api/status` | JSON，给脚本用 |
 
-**风险自负**：这类 token 属于订阅客户端（Claude Code / Codex），拿它驱动第三方服务可能违反供应商条款，也可能随时被吊销或改协议。baize 不代管账号、不刷新 token，出问题请自己承担。
+改配置仍然走 `.env` + 重启——不给浏览器留写入口。
 
-**Gemini 没有等价路径**：Google 公开的 SDK 只有 API key 与 Vertex AI 两条路；Gemini CLI 的 OAuth 走的是 Code Assist 内部端点，不是可复用的公开接口面，所以本服务不实现 Gemini 订阅。
+---
 
-> **未在真实订阅上验证过**：以上实现按 cc-switch 的请求形态编写，并用离线假 token 验证了请求头、请求体与 JWT 解析；手头没有可用的 Claude / ChatGPT 订阅账号，真实网络行为未验证。
+<details>
+<summary><b>埋点字段与费用口径</b></summary>
 
-## 接入 OCS
-
-把 [`contract/answerer.json`](contract/answerer.json) 的内容整段粘进 OCS 面板的「题库配置」：
-
-```json
-[
-	{
-		"name": "MyAI",
-		"homepage": "http://127.0.0.1:8787",
-		"url": "http://127.0.0.1:8787/answer",
-		"method": "post",
-		"type": "fetch",
-		"responseType": "json",
-		"headers": { "Content-Type": "application/json" },
-		"data": {
-			"title": "${title}",
-			"type": "${type}",
-			"options": "${options}"
-		},
-		"handler": "return (res)=> res && res.ok ? [undefined, res.answer] : undefined"
-	}
-]
-```
-
-`[undefined, res.answer]` 是 OCS 官方支持的写法：题目留空，由 OCS 自动回填当前题。
-
-## 请求与响应
-
-请求（字段与 `packages/core/src/core/answer-wrapper/answer.wrapper.handler.ts:46-66` 的 `env` 一致）：
+每题一行 JSONL，追加到 `logs/answers.jsonl`（已 gitignore）：
 
 ```json
-{
-	"title": "【单选题】1+2 = ?",
-	"type": "single",
-	"options": "A. 1\nB. 2\nC. 3\nD. 4",
-	"images": ["data:image/png;base64,..."],
-	"suggestion_title": "...",
-	"suggestion_options": "..."
-}
+{"ts":"2026-11-21T07:12:18.788Z","type":"single","title_len":5,"title_hash":"aee7...","options_n":4,
+ "provider":"opencode-go","model":"glm-5.3-flash","input_tokens":210,"output_tokens":4,
+ "reasoning_tokens":0,"cached_tokens":0,"cost":0,"list_cost":0.0006,"allowance":0.0000021,
+ "billing_source":"go","letters":[3],"margin":null,"votes":{"3":3},"ms":863,
+ "outcome":"ok","effective_type":"single"}
 ```
 
-- `options` 是**一个用 `\n` 分隔的字符串**，不是数组；填空题可能为空串。
-- `type` ∈ `single` / `multiple` / `judgement` / `completion` / `unknown`。
-- `images` 非空时，v1 直接返回 `unsupported_images`（见「已知限制」）。
+| 字段 | 来源 | 缺失时 |
+| --- | --- | --- |
+| `input_tokens` | openai `usage.prompt_tokens`；anthropic `usage.input_tokens`；gemini `usageMetadata.promptTokenCount`；responses `usage.input_tokens` | `null` |
+| `output_tokens` | 对应各家的 completion / candidatesTokenCount / output_tokens | `null` |
+| `reasoning_tokens` | openai `completion_tokens_details.reasoning_tokens`；gemini `thoughtsTokenCount`；responses `output_tokens_details.reasoning_tokens`；anthropic 不提供 | `null` |
+| `cached_tokens` | openai `prompt_tokens_details.cached_tokens`；anthropic `cache_read_input_tokens`；gemini `cachedContentTokenCount`；responses `input_tokens_details.cached_tokens` | `null` |
+| `cost` | `usage.cost`：本次实际扣费 | `null` |
+| `list_cost` | `opencode.list_cost`：按标价折算 | `null` |
+| `allowance` | `opencode.allowance`：占用的计划额度 | `null` |
+| `billing_source` | `opencode.billing_source`：`go` / `go-plus` / `balance` / `free` / `byok` | `null` |
 
-响应：
+- K 次自洽采样每次都真实计费，日志按次累加；任一样本缺字段则整项记 `null`（部分已知 ≠ 完整账单）
+- 只记题干长度 + sha256 前 16 位，**不记题干原文**；填空题的 `votes` 只记「第几个样本出现几次」
+- 写日志失败不影响答题主流程
+
+</details>
+
+<details>
+<summary><b>环境变量</b></summary>
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `ANSWERER_CHAIN` | 空 | 故障转移链，逗号分隔（`openai,deepseek,ollama`），优先于 `ANSWERER_PROVIDER` |
+| `ANSWERER_PROVIDER` | `openai` | 单 provider 兼容写法；`mock` 不联网 |
+| `ANSWERER_PROVIDERS_FILE` | `config/providers.json` | 预设表；同目录 `providers.local.json` 自动合并 |
+| `ANSWERER_MODEL` | 空 | 单 provider 链的全局模型；混合链必须逐家写 `model` |
+| `ANSWERER_HOST` | `127.0.0.1` | 监听地址；**只有容器里才该设成 `0.0.0.0`** |
+| `ANSWERER_PORT` | `8787` | 监听端口 |
+| `ANSWERER_K` | `3` | 自洽采样次数，1–10 |
+| `ANSWERER_MARGIN` | `0.15` | 置信度阈值，仅 logprobs 可用时生效 |
+| `ANSWERER_TIMEOUT_MS` | `20000` | 单次模型请求超时 |
+| `ANSWERER_LOG` | `1` | `0` 关闭埋点 |
+| `ANSWERER_LOG_FILE` | `logs/answers.jsonl` | 埋点文件 |
+| `ANSWERER_LOGPROBS` | `0` | `1` 时请求 logprobs（只对 openai 协议生效） |
+| `ANTHROPIC_OAUTH_TOKEN` / `OPENAI_OAUTH_TOKEN` | 空 | 订阅 token，优先于凭据文件 |
+| `OPENAI_ACCOUNT_ID` | 空 | Codex 的 `chatgpt-account-id` 覆盖值 |
+
+服务只读 `ANSWERER_*`、预设表里 `keyEnv` 指定的变量，以及 OAuth 三个变量；宿主机上其它 key 不会被自动采用。
+
+</details>
+
+<details>
+<summary><b>请求 / 响应 / reason</b></summary>
+
+请求字段与 OCS 的 `env` 一致（`answer.wrapper.handler.ts:46-66`）：`title` / `type` / `options`（`\n` 分隔的字符串）/ `images`（base64 数组）/ `suggestion_title` / `suggestion_options`。
 
 ```json
 { "ok": true, "answer": "C. 3" }
 { "ok": false, "reason": "low_confidence" }
 ```
 
-`ok:false` 时 OCS 会走「搜不到」分支，**这是期望行为**：弃权优于猜错。`reason` 取值：
-
 | reason | 含义 |
 | --- | --- |
-| `low_confidence` | K 次采样没有过半共识，或 logprobs margin 低于阈值 |
-| `invalid_output` | 模型输出无法解析 / 序号越界 / 重复 / 数量不符，重试一次仍失败 |
-| `provider_error` | 网络、HTTP 非 2xx、响应结构异常，重试一次仍失败 |
+| `low_confidence` | K 次采样没有过半共识，或 margin 低于阈值 |
+| `invalid_output` | 输出无法解析 / 序号越界 / 重复 / 数量不符，重试一次仍失败 |
+| `provider_error` | 网络、非 2xx、结构异常，重试一次仍失败 |
 | `unsupported_images` | 请求带图片，v1 不支持多模态 |
-| `invalid_request` | 请求本身不合法（HTTP 400），如空题干、选择题没有选项 |
+| `invalid_request` | 请求本身不合法（HTTP 400） |
 
-`ok:false` 的业务弃权仍返回 HTTP 200；只有 `invalid_request` 返回 400。
+业务弃权返回 HTTP 200；只有 `invalid_request` 返回 400。
 
-`GET /health` 用于探活：`{"ok":true,"service":"baize","compat":"ocsjs 5.4.2 @ 09628b7","provider":"...","chain":["..."],"model":"..."}`。`provider` 是链上第一家，不泄露任何密钥。
+</details>
 
-## 答案格式（本项目最核心的部分）
+<details>
+<summary><b>模型调用与自洽采样</b></summary>
 
-OCS 的匹配器对答案字符串有硬性要求，格式错了就是「搜不到」，甚至选错：
+- 统一 `temperature: 0`、不流式、无工具；`max_tokens` 选择题 256、填空 1200（推理模型的 thinking 会吃掉小预算，16 时实测返回空串）
+- prompt 只要求输出序号：`3` 或 `1,3`；选项以 `1) 2) 3)` 展示
+- 同一题并行打 K 次（`Promise.all`），每次**独立打乱选项顺序**（同时消位置偏置），映射回原始下标后取多数票
+- 没有过半共识 → `low_confidence`；任一次解析失败 → 该次重试一次，仍失败 → `invalid_output`
+- provider 返回 logprobs 时取 top-2 概率差作为 margin；多数网关不返回，此时只靠投票
 
-| 题型 | 返回什么 | ocsjs 依据 |
-| --- | --- | --- |
-| `single` | 选中选项的**原文**（从请求的 options 里原样取出，含 `A.` 前缀） | `packages/core/src/core/worker/resolvers/single.ts:27-45` 先 `answerNormalizedMatch` 再 `answerSimilar`；两侧都过 `removeRedundant`（`packages/core/src/core/utils/string.ts:250-256`），前缀被对称剥离，所以回原文能命中自己 |
-| `multiple` | 多个选项原文，用 `#` 连接 | `packages/core/src/core/worker/resolvers/multiple.ts:42`；分隔符全集 `['===','#','---','###','|',';','；']`（`packages/core/src/core/worker/utils.ts:139`），`#` 排在 `===` 之后、其余之前，最安全 |
-| `judgement` | **词表 token**（`正确`/`错误`/`对`/`错`/`√`/`×`/`True`/`False`…），不能带 `A.` 前缀 | `packages/core/src/core/worker/resolvers/judgement.ts:9-29` 定义词表，`:40-63` 做**整串相等**比较：`A. 正确` 归一化后是 `a正确`，匹配不上 |
-| `completion` | 各空答案用 `#` 连接，按空位顺序 | `packages/core/src/core/worker/resolvers/completion.ts:19-27` 用 `splitAnswer` 切分后依次填 |
+</details>
 
-几个容易踩的点：
-
-- **绝不返回 `A`/`B` 纯字母**（除非题目本来就是纯字母选项，走 `multiple.ts:162` 的 `plainOptions` 兜底，优先级更低）。
-- **绝不返回模型自己的措辞**，那会去撞 0.6 的相似度阈值。
-- 判断题返回的 token 必须来自**选项自身**：`resolveJudgement` 是词表整串相等，不是语义映射。选项是 `√` 就返回 `√`，不能返回 `正确`——`正确` 匹配不上 `√`。
-- 选项含 `#` 会破坏多答案切分：填空题答案里出现 `#` 或 `===` 时直接 `invalid_output` 弃权，不返回会被切错的字符串。
-
-## 模型调用与自洽采样
-
-- 每家 provider 按自己的官方线格式发请求：OpenAI `POST {baseUrl}/chat/completions`、Anthropic `POST {baseUrl}/messages`、Gemini `POST {baseUrl}/models/{model}:generateContent`、Responses `POST {baseUrl}/responses`；统一 `temperature: 0`，`max_tokens` / `max_output_tokens` 为 32（填空 600），不流式、无工具。
-- prompt 只要求输出序号：`3` 或 `1,3`；选项以 `1) 2) 3)` 展示，**模型看不到也不需要输出 A/B/C**。
-- 同一题并行打 K 次（`Promise.all`，墙钟≈一次），每次**独立打乱选项顺序**（Fisher-Yates，同时消位置偏置），模型输出映射回原始下标后取多数票。
-- K 次里没有过半共识（`winner.count * 2 <= K`）→ `low_confidence`。
-- 任一次解析失败/越界/数量不符 → 该次重试一次；仍失败 → `invalid_output`。
-- provider 返回 logprobs 时（需 `ANSWERER_LOGPROBS=1`），首个数字 token 的 top-2 概率差作为 margin，低于 `ANSWERER_MARGIN` → `low_confidence`。多数网关不返回 logprobs，此时 margin 为 `null`，只靠自洽投票。
-
-## 环境变量
-
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `ANSWERER_CHAIN` | 空 | 故障转移链，逗号分隔的 provider id（如 `openai,deepseek,ollama`）；优先于 `ANSWERER_PROVIDER` |
-| `ANSWERER_PROVIDER` | `openai` | 单 provider 兼容写法；`mock` 不联网，返回预置答案 |
-| `ANSWERER_PROVIDERS_FILE` | `config/providers.json` | 供应商预设表路径；同目录的 `providers.local.json` 会自动合并 |
-| `ANSWERER_MODEL` | 空 | 单 provider 链的全局模型名；混合链必须在 `providers.local.json` 里逐家写 `model` |
-| `ANSWERER_BASE_URL` | 空 | 旧配置：只覆盖链上第一家的 baseUrl |
-| `ANSWERER_API_KEY` | 空 | 旧配置：只覆盖链上第一家的 key；其余 provider 用各自的 `keyEnv` |
-| `ANSWERER_PORT` | `8787` | 监听端口（地址固定 `127.0.0.1`，不可改） |
-| `ANSWERER_K` | `3` | 自洽采样次数，1–10 |
-| `ANSWERER_MARGIN` | `0.15` | 置信度阈值，仅 logprobs 可用时生效 |
-| `ANSWERER_TIMEOUT_MS` | `20000` | 单次模型请求超时 |
-| `ANSWERER_LOG` | `1` | `0` 关闭 JSONL 埋点 |
-| `ANSWERER_LOG_FILE` | `logs/answers.jsonl` | 埋点文件 |
-| `ANSWERER_LOGPROBS` | `0` | `1` 时请求 logprobs（只对 openai 协议生效；网关不支持会 400） |
-| `ANTHROPIC_OAUTH_TOKEN` | 空 | Claude Code 订阅 token；设置后优先于 `~/.claude/.credentials.json` |
-| `OPENAI_OAUTH_TOKEN` | 空 | Codex 订阅 token；设置后优先于 `~/.codex/auth.json` |
-| `OPENAI_ACCOUNT_ID` | 空 | Codex 的 `chatgpt-account-id`；设置后覆盖凭据文件 / JWT 里的值 |
-
-服务只读 `ANSWERER_*` 变量、预设表里 `keyEnv` 指定的变量，以及 OAuth 模式下的 `ANTHROPIC_OAUTH_TOKEN` / `OPENAI_OAUTH_TOKEN` / `OPENAI_ACCOUNT_ID`；宿主机上的其它 API key 不会被自动采用。`.env` 与 `config/providers.local.json` 都已在 `.gitignore` 里。
-
-## 埋点
-
-每题一行 JSONL，追加到 `logs/answers.jsonl`（已 gitignore）：
-
-```json
-{"ts":"2026-11-20T12:00:00.000Z","type":"single","title_len":7,"title_hash":"9f2c...","options_n":4,"provider":"opencode","model":"...","input_tokens":35,"output_tokens":16,"reasoning_tokens":16,"cached_tokens":0,"cost":0,"list_cost":0.00001485,"billing_source":"go","letters":[3],"margin":null,"votes":{"3":3},"ms":812,"outcome":"ok","effective_type":"single"}
-```
-
-费用与 token 明细的取值来源（四种协议字段名不同，统一成同一组日志字段）：
-
-| 字段 | 来源 | 缺失时 |
-| --- | --- | --- |
-| `input_tokens` | openai `usage.prompt_tokens`；anthropic `usage.input_tokens`；gemini `usageMetadata.promptTokenCount`；responses `usage.input_tokens` | `null` |
-| `output_tokens` | openai `usage.completion_tokens`；anthropic `usage.output_tokens`；gemini `usageMetadata.candidatesTokenCount`；responses `usage.output_tokens` | `null` |
-| `reasoning_tokens` | openai `usage.completion_tokens_details.reasoning_tokens`；gemini `usageMetadata.thoughtsTokenCount`；responses `usage.output_tokens_details.reasoning_tokens`；anthropic 不提供 | `null` |
-| `cached_tokens` | openai `usage.prompt_tokens_details.cached_tokens`；anthropic `usage.cache_read_input_tokens`；gemini `usageMetadata.cachedContentTokenCount`；responses `usage.input_tokens_details.cached_tokens` | `null` |
-| `cost` | `usage.cost` / `usageMetadata.cost`：本次实际扣费（美元） | `null` |
-| `list_cost` | `opencode.list_cost`：按公开标价折算的费用 | `null` |
-| `billing_source` | `opencode.billing_source`：`go` / `go-plus` / `balance` / `free` / `byok` | `null` |
-
-- **`cost` 是实际计费，`list_cost` 是标价**：订阅额度内 `cost` 可能是 0，而 `list_cost` 仍是这次调用按价目表值多少钱；`byok` 走自己的 key 时实际计费也可能是 0。两者都为 0 表示确实免费，`null` 表示供应商没给这个字段——看板不要把它们合并，更不要把 `null` 当 0。
-- K 次自洽采样每次都是真实调用，日志按次累加（`cost` 是本题总花费，token 是总用量）。任一样本缺该字段则整项记 `null`：部分已知的总和不等于完整账单。混合链上出现多个 `billing_source` 时也记 `null`。
-- 只记题干长度 + sha256 前 16 位，**不记题干原文**；token 明细是计数，同样不含题目或答案正文。
-- 填空题的 `votes` 只记「第几个样本出现几次」，避免把答案正文写进日志。
-- 写日志失败不会影响答题主流程。旧日志行没有这些字段，看板应显示为未知（null），不是免费。
-
-## 测试与评测
+<details>
+<summary><b>测试与评测</b></summary>
 
 ```bash
-node --test                 # 116 个测试：格式化、prompt、protocols、router、config、provider、service、HTTP、契约
+node --test                        # 129 项：格式化 / prompt / 协议 / 路由 / 配置 / 服务 / HTTP / 管理页 / 看板
 node --test eval/format.test.mjs   # 真实用例评测（也在 node --test 里）
 ```
 
-评测用 `eval/cases.json`（逐字节复制自 ocsjs 的 `tests/cases.json`），把每个用例的 `expect` 下标当作「模型的正确答案」，反向跑格式化器，再按 OCS 的 `#` 切分，断言切出来就是期望的选项原文；判断题还会用复刻的 `resolveJudgement` 验证 token 真的能选中目标选项。
+`eval/cases.json` 逐字节复制自 ocsjs 的 `tests/cases.json`（commit `09628b7`，MIT，Copyright (c) 2022 enncy），sha256 `12feb6c6...`，测试里有断言防篡改。159 个用例中 137 个可作答（22 个 `expect: []` 是本来就无解的负例）。
 
-- 159 个用例中 137 个可作答（22 个 `expect: []` 是「本就无解」的负例，跳过）。
-- 单选/多选/判断额外跑一遍「加 `A. ` 前缀」的变体，验证前缀剥离的对称性。
+</details>
+
+---
 
 ## 安全
 
-- **只绑 `127.0.0.1`**，代码里写死，没有环境变量能改成 `0.0.0.0`。
-- OCS 的题库配置里 `type: "fetch"` 走的是**页面原生 fetch**（`answer.wrapper.handler.ts:75-97`），属于跨域请求。本服务返回 `Access-Control-Allow-Origin: *` 并处理 `OPTIONS` 预检，否则真实网课页面一个请求都发不出去。
-- 官方用户脚本的 `@connect` 已包含 `127.0.0.1`（`scripts/build-core.js:91-99`）。如果你用的是旧版或自行编译的脚本，改用「全域名通用版」——它在 `@connect` 里追加了 `*`（`scripts/build-core.js:176-178`）。
-- **题库配置里的 `handler` 等价于在页面里执行代码**（`answer.wrapper.handler.ts:168-190` 用 `new Function(handler)()`）。所以服务地址要固定、只贴你自己审查过的 `contract/answerer.json`；不要做「从远端动态拉题库配置」这类功能。
-- API key 只存在服务端环境变量里，永远不进用户脚本配置、不进日志。
-- 已知边界：任何网页都能向 `127.0.0.1:8787` 发跨域 POST（这是兼容任意网课域名的代价）。它只监听回环、不暴露公网；若介意被无关网页消耗 token，可在浏览器/防火墙层限制，或自行加 token 校验。
-- 无鉴权、无限流：这是本机单用户工具，不要直接反代到公网。
+- **默认只绑 `127.0.0.1`**；容器场景下的 `0.0.0.0` 只存在于容器内，宿主机仍只发布回环端口
+- OCS 用页面原生 `fetch`（跨域），因此服务返回 `Access-Control-Allow-Origin: *` 并处理 `OPTIONS` 预检
+- **题库配置里的 `handler` 等价于在页面里执行代码**（`new Function`）。所以地址要固定、只贴你自己审查过的配置，不要做「从远端动态拉题库配置」
+- 已知边界：任何网页都能向 `127.0.0.1:8787` 发跨域 POST（这是兼容任意网课域名的代价）。只监听回环、不暴露公网；介意的话在防火墙层限制
+- 无鉴权、无限流：本机单用户工具，**不要直接反代到公网**
 
 ## 已知限制
 
-- **图片题未实现**：`images` 非空一律 `unsupported_images`，不会静默返回错误答案。
-- **OCS 自带按题干精确匹配的缓存**：重复题不会打到模型，所以日志里看到的请求数会少于实际题数。
-- **填空题不知道空位数量**：OCS 的请求不带 blank 数，只能让模型按题干给数组；答案里含 `#`/`===` 时弃权。
-- **`unknown` 题型靠推断**：两个选项且一正一误 → 判断题；有选项 → 单选；无选项 → 填空。推断错会答错，日志里 `effective_type` 可复盘。
-- **margin 通常不可用**：绝大多数供应商不返回 logprobs（Anthropic / Gemini 明确没有），`ANSWERER_MARGIN` 实际很少生效，置信度主要靠 K 次自洽投票。
-- **LLM 仍可能「自信地答错」**：自洽投票只过滤不稳定输出，过滤不了稳定的错误知识。
-- **故障转移不覆盖模型输出错误**：HTTP 2xx 但答案格式错只会重试一次，不会换供应商（避免把内容问题误判为供应商故障）。
-- 没有指数退避、没有并发上限、没有响应缓存、没有多模态、没有流式。
+- **图片题未实现**：`images` 非空一律 `unsupported_images`，不猜、不静默降级
+- **多行选项会错位**：OCS 把选项按 `\n` 拼成一个字符串，选项内部含换行时下标会对不上（OCS 传过来时就丢了结构）
+- **`type: unknown` 靠推断**：两选项一正一误 → 判断；有选项 → 单选；无选项 → 填空。推断错就答错，日志里 `effective_type` 可复盘
+- **margin 通常不可用**：Anthropic / Gemini 没有 logprobs，置信度主要靠 K 次投票
+- **LLM 会「自信地答错」**：自洽投票只过滤不稳定输出，过滤不了稳定的错误知识
+- **故障转移不覆盖内容错误**：2xx 但格式错只重试一次，不换供应商（避免把内容问题误判为故障）
+- 没有指数退避、没有并发上限、没有响应缓存、没有多模态、没有流式
 
 ## 目录结构
 
-```
-baize/
-├── config/
-│   └── providers.json  供应商预设表（数据，不含模型 ID）
+```text
+.
 ├── src/
-│   ├── format.mjs      答案格式化 + OCS 词表/前缀规则（核心算法）
-│   ├── prompt.mjs      提示词构建、打乱顺序、序号/填空解析
-│   ├── providers.mjs   预设表校验、providers.local.json 合并、key 解析
-│   ├── oauth.mjs       订阅 OAuth 凭据读取、JWT payload 解析、Claude Code 指纹常量
-│   ├── protocols/      openai / anthropic / gemini / responses 四种线格式 + 共用 HTTP
-│   ├── router.mjs      故障转移链、可切换/致命错误分类、进程内熔断
-│   ├── provider.mjs    AnswerProvider：openai（单家兼容） / mock
-│   ├── service.mjs     自洽采样、多数票、重试、弃权、埋点
-│   ├── server.mjs      node:http + CORS + 路由
-│   ├── config.mjs      环境变量与 .env
-│   └── log.mjs         JSONL 埋点
-├── test/               单元 + HTTP 测试（node:test）
-├── eval/               cases.json（ocsjs MIT）+ 评测
-├── contract/answerer.json   OCS 侧要贴的题库配置
-└── logs/               answers.jsonl（gitignore）
+│   ├── server.mjs        HTTP：/answer /health /dashboard /settings /api/status
+│   ├── config.mjs        env、链路、目录型 provider
+│   ├── providers.mjs     预设表合并、auth 模式、headers 占位符
+│   ├── router.mjs        故障转移、熔断、目录解析
+│   ├── service.mjs       自洽采样、多数票、弃权、埋点
+│   ├── catalog.mjs       OpenCode 模型目录（TTL 缓存）
+│   ├── oauth.mjs         Claude / Codex 订阅凭据
+│   ├── protocols/        openai · anthropic · gemini · responses
+│   └── web/              看板与只读管理页
+├── tools/                quota.mjs（额度表）· dashboard.mjs（CLI）
+├── contract/answerer.json  OCS 侧要贴的那段配置
+├── config/               provider 预设 · 额度快照
+├── scripts/              start.bat · win-portable.ps1
+└── docs/                 windows · docker · dashboard
 ```
 
-## 为什么是 `.mjs` 而不是 `.ts`
+## 为什么这样设计
 
-任务书允许「TypeScript + `--experimental-strip-types`」或「纯 ESM `.mjs`」二选一。本机 Node v22.22.1 **编译时未启用 TypeScript 支持**：
+- **零运行时依赖**：只用 `node:http` / `node:fs` / `node:crypto` / 全局 `fetch`。不装包才能「复制即跑」、`docker build` 秒级完成、将来能打成单文件
+- **手写协议，不引官方 SDK**：SDK 本质是 HTTP + 重试 + 类型，换来几十 MB 依赖和锁死的打包方式；这里只需要「一次非流式 JSON 请求 + 取一段文本」
+- **`.mjs` 而不是 `.ts`**：本机 Node 编译时未启用 TypeScript 支持（`ERR_NO_TYPESCRIPT`），用 JSDoc 注解补类型，`node --test` 不需要任何 flag
+- **弃权优先**：所有不确定都返回 `ok:false`，让用户手填，而不是把猜的答案写进页面
 
-```
-$ node --experimental-strip-types -e "1"
-Error [ERR_NO_TYPESCRIPT]: Node.js is not compiled with TypeScript support
-```
+---
 
-所以选了 `.mjs` 分支：启动是 `node src/server.mjs`，`node --test` 也不需要任何 flag。代价是没有静态类型，用 JSDoc 注解补足。
+<div align="center">
+<sub>
 
-## 为什么不引官方 SDK
+**免责声明** · 本项目仅供学习与自动化技术研究，请遵守所在学校/平台的使用条款。
+作者不提供绕过平台风控的能力，也不对使用后果负责。
 
-- 三个 SDK（`openai` / `@anthropic-ai/sdk` / `@google/genai`）会拖进大量传递依赖，`npm install` 一装就违背「零依赖、复制即跑」，也没法 `bun build --compile` 成单文件。
-- 本服务只需要「一次非流式 JSON 请求 + 取一段文本」，三家的线格式已经收敛在 `src/protocols/*.mjs` 的 `buildRequest` / `parseResponse` 两个纯函数里；新增协议只要实现同名接口，路由与业务层不用动。
-- 官方 SDK 的流式、工具调用、自动重试等能力一个都用不上；故障转移需要看得见的错误分类（状态码 / 是否可重试），手写 fetch 反而更可控。
+<br><br>
 
-## 评测数据来源与许可
+MIT License · 兼容 ocsjs 5.4.2 @ 09628b7 · [上游仓库](https://github.com/ocsjs/ocsjs)
 
-`eval/cases.json` 逐字节复制自 [ocsjs/ocsjs](https://github.com/ocsjs/ocsjs) `tests/cases.json`（commit `09628b7`，877 行），MIT License，Copyright (c) 2022 enncy。
+<br>
 
-sha256：`12feb6c638726e9238c1226f43f325b88b7af8734ea4f7768e8d6b8281665835`（`eval/format.test.mjs` 里有断言，防止 fixture 被悄悄改动）。
+名字取自《山海经》：「白泽知万物之情」——知万物，且能言人语。
+
+</sub>
+</div>
