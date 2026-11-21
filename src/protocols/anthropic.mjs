@@ -6,7 +6,7 @@ import {
 	CLAUDE_CODE_IDENTITY,
 	DEFAULT_CLAUDE_CODE_USER_AGENT
 } from '../oauth.mjs';
-import { ProtocolError } from './http.mjs';
+import { mergeHeaders, ProtocolError } from './http.mjs';
 
 export const ANTHROPIC_VERSION = '2023-06-01';
 export { OAUTH_BETA, CLAUDE_CODE_BETA, ANTHROPIC_OAUTH_BETA } from '../oauth.mjs';
@@ -33,10 +33,7 @@ export function buildRequest(input) {
 	const { provider, model, prompt, maxTokens, temperature = 0, signal } = input;
 
 	/** @type {Record<string, string>} */
-	const headers = {
-		'Content-Type': 'application/json',
-		'anthropic-version': ANTHROPIC_VERSION
-	};
+	const headers = mergeHeaders(provider, { 'anthropic-version': ANTHROPIC_VERSION });
 
 	// auth 与线协议正交：
 	// - api-key（默认）→ x-api-key；

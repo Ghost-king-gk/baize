@@ -1,11 +1,11 @@
 // @ts-check
 /** OpenAI Chat Completions 线格式。 */
 
-import { ProtocolError } from './http.mjs';
+import { mergeHeaders, ProtocolError } from './http.mjs';
 
 /**
  * @param {{
- *   provider: {baseUrl: string, apiKey?: string, auth?: string},
+ *   provider: {baseUrl: string, apiKey?: string, auth?: string, headers?: Record<string, string>},
  *   model: string,
  *   prompt: string,
  *   maxTokens: number,
@@ -19,7 +19,7 @@ export function buildRequest(input) {
 	const { provider, model, prompt, maxTokens, temperature = 0, signal, logprobs } = input;
 
 	/** @type {Record<string, string>} */
-	const headers = { 'Content-Type': 'application/json' };
+	const headers = mergeHeaders(provider);
 	if (provider.apiKey && provider.auth !== 'none') headers.Authorization = `Bearer ${provider.apiKey}`;
 
 	/** @type {Record<string, any>} */

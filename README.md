@@ -107,7 +107,21 @@ OPENCODE_GO_API_KEY=... ANSWERER_CHAIN=opencode-go ANSWERER_MODEL=claude-haiku-5
 - 目录在进程内缓存 **10 分钟**（按目录 URL 复用同一个实例），过期或重启后重新拉取；不落盘。
 - 目录拉取失败（网络、超时、5xx、非 JSON）算**可切换错误**：该 provider 被跳过，继续故障转移链；模型不存在或 `api` 结构不对算配置错误，立即失败。任何情况下都不会静默用错地址。
 
+**必须带 `x-opencode-session`**：OpenCode Go 用它做路由与 prompt 缓存，缺了会直接 400 `MissingSessionID`。两个预设已经带了这个头（值由进程启动时生成，`${session}` 占位符），你不需要手写：
+
+```json
+"opencode-go": {
+  "catalog": { "url": "https://opencode.ai/inference/go/v1/models" },
+  "keyEnv": "OPENCODE_GO_API_KEY",
+  "headers": { "x-opencode-session": "${session}" }
+}
+```
+
+另外每个请求都会带 `User-Agent: baize/0.1.0`（Go 要求客户端自报身份，不要用通用 SDK 名）。
+
 **免费模型只在 OpenCode 客户端内可用**：其他客户端即使带 key 也会收到 403。baize 属于外部客户端，必须用付费模型或 Go 订阅。每次响应的 `usage` 里带 `cost` 与 `opencode.billing_source`，可以直接核对是不是走的订阅额度（`go` / `go-plus`）。
+
+Go 的额度按模型分档（月额度，美元）：`glm-5.3` 500、`deepseek-v4.1-flash` 100、`glm-5.3-flash` 60、`gemini-4-argon` 30、`claude-haiku-5-5` / `kimi-k3` 15。所以推荐用链：快的放前面，额度大的放后面兜底。
 
 预设表**绝不写模型 ID**：模型来自全局 `ANSWERER_MODEL`（只适用于单 provider 链），或在 `providers.local.json` 里按 provider 写 `model`。**混合链（`ANSWERER_CHAIN` 多于一家）必须逐家指定 `model`**，否则启动即拒绝，不会拖到第一次请求才发现第二家 404/400：
 
@@ -128,6 +142,7 @@ ANSWERER_CHAIN=openai,deepseek node src/server.mjs
 | 情况 | 行为 |
 | --- | --- |
 | 网络错误、超时、HTTP 408 / 429 / 5xx、响应不是 JSON | 记一次失败，换下一家 |
+| HTTP 402（订阅额度 / 余额耗尽） | 同样换下一家：额度问题不该让整题失败 |
 | HTTP 401 / 403 / 404（key 过期、无权限、模型/路径不存在） | 同样换下一家，日志打独立的 `provider_auth_failed`；也计入熔断 |
 | HTTP 400 及其余 4xx | **立即抛出**，不继续烧别家额度 |
 | HTTP 2xx 但内容截断 / 空输出 / 序号非法 | 不切下一家（供应商已经应答），按 `invalid_output` 重试一次 |

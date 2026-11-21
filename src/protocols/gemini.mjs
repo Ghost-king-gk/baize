@@ -1,11 +1,11 @@
 // @ts-check
 /** Google Gemini generateContent 线格式。 */
 
-import { ProtocolError } from './http.mjs';
+import { mergeHeaders, ProtocolError } from './http.mjs';
 
 /**
  * @param {{
- *   provider: {baseUrl: string, apiKey?: string, auth?: string},
+ *   provider: {baseUrl: string, apiKey?: string, auth?: string, headers?: Record<string, string>},
  *   model: string,
  *   prompt: string,
  *   maxTokens: number,
@@ -18,7 +18,7 @@ export function buildRequest(input) {
 	const { provider, model, prompt, maxTokens, temperature = 0, signal } = input;
 
 	/** @type {Record<string, string>} */
-	const headers = { 'Content-Type': 'application/json' };
+	const headers = mergeHeaders(provider);
 	if (provider.apiKey) {
 		// auth=bearer 走网关（如 OpenCode Inference）；缺省 api-key 仍用 Google 原生头。
 		if (provider.auth === 'bearer') headers.Authorization = `Bearer ${provider.apiKey}`;

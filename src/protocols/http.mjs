@@ -5,8 +5,37 @@
 export const AUTH_FAILURE_STATUSES = new Set([401, 403, 404]);
 
 /**
+ * 默认 User-Agent。OpenCode Go 明确要求客户端自报身份，而不是用通用 SDK 名；
+ * 与 package.json 的 version 保持一致。
+ */
+export const CLIENT_USER_AGENT = 'baize/0.1.0';
+
+/**
+ * 组装请求头：Content-Type + provider 自定义头（可覆盖默认值），缺省补 User-Agent。
+ * provider.headers 里的 `\${session}` 已在 providers.mjs 解析阶段替换成稳定会话 ID。
+ * @param {{headers?: Record<string, string>} | undefined} provider
+ * @param {Record<string, string>} [base]
+ * @returns {Record<string, string>}
+ */
+export function mergeHeaders(provider, base = {}) {
+	/** @type {Record<string, string>} */
+	const headers = { 'Content-Type': 'application/json', ...base };
+	const custom = provider?.headers;
+	if (custom && typeof custom === 'object') {
+		for (const [key, value] of Object.entries(custom)) {
+			if (value === undefined || value === null) continue;
+			headers[key] = String(value);
+		}
+	}
+	if (!Object.keys(headers).some((key) => key.toLowerCase() === 'user-agent')) {
+		headers['User-Agent'] = CLIENT_USER_AGENT;
+	}
+	return headers;
+}
+
+/**
  * 协议层错误。router 依据 retryable 决定「换下一家」还是「立即抛出」。
- * - retryable: 网络错误、超时、HTTP 408/429/5xx、401/403/404、响应不是 JSON
+ * - retryable: 网络错误、超时、HTTP 402/408/429/5xx、401/403/404、响应不是 JSON
  * - authFailure: 401/403/404，router 会打独立的 provider_auth_failed 日志
  * - 致命: 其余 4xx（400 等）以及本地配置错误
  */
@@ -63,7 +92,8 @@ export async function fetchJson(request, fetchImpl = globalThis.fetch) {
 		throw new ProtocolError(`http_${status}: ${body}`, {
 			status,
 			// 401/403/404 与 408/429/5xx 一样换下一家；400 等其余 4xx 仍立即抛出。
-			retryable: authFailure || status === 408 || status === 429 || status >= 500,
+			// 402 Payment Required：订阅额度/余额耗尽，换下一家比整题失败合理。
+			retryable: authFailure || status === 402 || status === 408 || status === 429 || status >= 500,
 			authFailure,
 			body
 		});

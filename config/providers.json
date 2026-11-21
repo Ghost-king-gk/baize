@@ -61,12 +61,22 @@
 	},
 	"opencode": {
 		"label": "OpenCode Models",
-		"catalog": { "url": "https://opencode.ai/inference/v1/models" },
-		"keyEnv": "OPENCODE_GO_API_KEY"
+		"catalog": {
+			"url": "https://opencode.ai/inference/v1/models"
+		},
+		"keyEnv": "OPENCODE_GO_API_KEY",
+		"headers": {
+			"x-opencode-session": "${session}"
+		}
 	},
 	"opencode-go": {
 		"label": "OpenCode Go（订阅）",
-		"catalog": { "url": "https://opencode.ai/inference/go/v1/models" },
-		"keyEnv": "OPENCODE_GO_API_KEY"
+		"catalog": {
+			"url": "https://opencode.ai/inference/go/v1/models"
+		},
+		"keyEnv": "OPENCODE_GO_API_KEY",
+		"headers": {
+			"x-opencode-session": "${session}"
+		}
 	}
 }

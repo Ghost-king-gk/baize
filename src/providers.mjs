@@ -9,7 +9,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { randomUUID } from 'node:crypto';
+
 import { readClaudeOAuth, readCodexOAuth } from './oauth.mjs';
+
+/** 进程内稳定的会话 ID：OpenCode Go 用它做路由与 prompt 缓存。 */
+export const SESSION_ID = `baize-${randomUUID().slice(0, 8)}`;
 
 /** 预设表允许的线协议（严格照官方 API）。`responses` 也走官方 API，只是端点不同。 */
 export const PROTOCOLS = ['openai', 'anthropic', 'gemini', 'responses'];
@@ -179,8 +184,25 @@ export function normalizeProvider(id, entry, options = {}) {
 		throw new Error(`provider "${id}" 的 model 必须是非空字符串`);
 	}
 
+	/** @type {Record<string, string> | undefined} */
+	let headers;
+	if (entry.headers !== undefined) {
+		if (!entry.headers || typeof entry.headers !== 'object' || Array.isArray(entry.headers)) {
+			throw new Error(`provider "${id}" 的 headers 必须是 { 名称: 字符串 } 对象`);
+		}
+		headers = {};
+		for (const [name, value] of Object.entries(entry.headers)) {
+			if (typeof value !== 'string') {
+				throw new Error(`provider "${id}" 的 headers."${name}" 必须是字符串`);
+			}
+			// ${session} 由本进程生成，保证同一进程内稳定（利于网关的 prompt 缓存）。
+			headers[name] = value.replaceAll('${session}', SESSION_ID);
+		}
+	}
+
 	return {
 		...entry,
+		headers,
 		id,
 		label: typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : id,
 		protocol: isCatalog ? null : protocol,

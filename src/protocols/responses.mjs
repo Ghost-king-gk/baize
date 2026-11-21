@@ -11,7 +11,7 @@
 
 import { InvalidOutputError } from '../format.mjs';
 import { CODEX_ORIGINATOR } from '../oauth.mjs';
-import { ProtocolError } from './http.mjs';
+import { mergeHeaders, ProtocolError } from './http.mjs';
 
 /**
  * @param {{
@@ -20,6 +20,7 @@ import { ProtocolError } from './http.mjs';
  *     protocol?: string,
  *     apiKey?: string,
  *     auth?: string,
+ *     headers?: Record<string, string>,
  *     accountId?: string | null,
  *     account_id?: string | null
  *   },
@@ -49,7 +50,7 @@ export function buildRequest(input) {
 	}
 
 	/** @type {Record<string, string>} */
-	const headers = { 'Content-Type': 'application/json' };
+	const headers = mergeHeaders(provider);
 	if (isCodexOauth) headers.originator = CODEX_ORIGINATOR;
 	if (provider.apiKey && auth !== 'none') headers.Authorization = `Bearer ${provider.apiKey}`;
 	if (isCodexOauth && accountId) headers['chatgpt-account-id'] = accountId;

@@ -343,7 +343,8 @@ test('路由：目录 provider 在 ask 时解析协议与 baseUrl，最终 URL �
 	assert.equal(headers.Authorization, 'Bearer stub-token');
 	assert.equal('x-api-key' in headers, false, '目录形态默认 bearer，不能混用 x-api-key');
 	assert.equal('anthropic-beta' in headers, false);
-	assert.deepEqual(Object.keys(headers).sort(), ['Authorization', 'Content-Type', 'anthropic-version']);
+	assert.deepEqual(Object.keys(headers).sort(), ['Authorization', 'Content-Type', 'User-Agent', 'anthropic-version']);
+	assert.equal(headers['User-Agent'], 'baize/0.1.0', '客户端自报身份（OpenCode Go 要求）');
 
 	const event = logs.find((item) => item.event === 'catalog_resolved');
 	assert.deepEqual(

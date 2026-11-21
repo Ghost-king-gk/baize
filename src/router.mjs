@@ -272,7 +272,7 @@ export function createRouter(config) {
 			model: provider.model,
 			// 协议适配器只接受单段 prompt：把 system 与 user 用空行拼接。
 			prompt: prompt.system ? `${prompt.system}\n\n${prompt.user}` : prompt.user,
-			maxTokens: isCompletion ? 600 : 32,
+			maxTokens: isCompletion ? 1200 : 256,
 			temperature: 0,
 			signal: AbortSignal.timeout(timeoutMs),
 			logprobs
