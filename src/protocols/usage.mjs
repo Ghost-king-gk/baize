@@ -14,6 +14,7 @@
  *   cachedTokens: number | null,
  *   cost: number | null,
  *   listCost: number | null,
+ *   allowance: number | null,
  *   billingSource: string | null
  * }} Usage
  */
@@ -38,12 +39,14 @@ export function stringOrNull(value) {
  * 费用字段在四种协议里位置一致：usage（Gemini 为 usageMetadata）下的
  * cost 与 opencode.{billing_source,list_cost}。
  * @param {any} usage
- * @returns {{cost: number | null, listCost: number | null, billingSource: string | null}}
+ * @returns {{cost: number | null, listCost: number | null, allowance: number | null, billingSource: string | null}}
  */
 export function costFields(usage) {
 	return {
 		cost: numberOrNull(usage?.cost),
 		listCost: numberOrNull(usage?.opencode?.list_cost),
+		// 订阅额度计数：Go 套餐里 cost 恒为 0，真正扣额度的是 allowance。
+		allowance: numberOrNull(usage?.opencode?.allowance),
 		billingSource: stringOrNull(usage?.opencode?.billing_source)
 	};
 }

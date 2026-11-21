@@ -19,6 +19,7 @@ const NULL_USAGE = {
 	cachedTokens: null,
 	cost: null,
 	listCost: null,
+	allowance: null,
 	billingSource: null
 };
 
@@ -332,7 +333,7 @@ test('openai.parseResponse：完整 usage → 九字段（cached / reasoning / c
 			prompt_tokens_details: { cached_tokens: 7 },
 			completion_tokens_details: { reasoning_tokens: 16 },
 			cost: 0,
-			opencode: { billing_source: 'go', list_cost: 0.00001485 }
+			opencode: { billing_source: 'go', list_cost: 0.00001485, allowance: 0.00000891 }
 		}
 	});
 
@@ -343,6 +344,7 @@ test('openai.parseResponse：完整 usage → 九字段（cached / reasoning / c
 		cachedTokens: 7,
 		cost: 0,
 		listCost: 0.00001485,
+		allowance: 0.00000891,
 		billingSource: 'go'
 	});
 });
@@ -367,6 +369,7 @@ test('anthropic.parseResponse：完整 usage → 九字段（reasoning 不提供
 		cachedTokens: 5,
 		cost: 0.0002,
 		listCost: 0.0003,
+		allowance: null,
 		billingSource: 'byok'
 	});
 });
@@ -391,6 +394,7 @@ test('gemini.parseResponse：完整 usageMetadata → 九字段（thoughts / cac
 		cachedTokens: 4,
 		cost: 0,
 		listCost: 0,
+		allowance: null,
 		billingSource: 'free'
 	});
 });
@@ -416,6 +420,7 @@ test('responses.parseResponse：完整 usage → 九字段（input/output 的 de
 		cachedTokens: 3,
 		cost: 0.001,
 		listCost: 0.0012,
+		allowance: null,
 		billingSource: 'balance'
 	});
 });

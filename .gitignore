@@ -1,6 +1,9 @@
 node_modules/
 .env
 .env.*
+
+# 看板产物
+dashboard.html
 !.env.example
 logs/
 *.log

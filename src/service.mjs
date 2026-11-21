@@ -75,6 +75,7 @@ function sumUsage(samples) {
 		cachedTokens: total((usage) => usage?.cachedTokens),
 		cost: total((usage) => usage?.cost),
 		listCost: total((usage) => usage?.listCost),
+		allowance: total((usage) => usage?.allowance),
 		billingSource: sources.size === 1 ? [...sources][0] : null
 	};
 }
@@ -166,6 +167,7 @@ export function createService(config) {
 			cached_tokens: null,
 			cost: null,
 			list_cost: null,
+			allowance: null,
 			billing_source: null,
 			letters: null,
 			margin: null,
@@ -223,6 +225,7 @@ export function createService(config) {
 		record.cached_tokens = usage.cachedTokens;
 		record.cost = usage.cost;
 		record.list_cost = usage.listCost;
+		record.allowance = usage.allowance;
 		record.billing_source = usage.billingSource;
 
 		/** @param {Sample} sample */
