@@ -11,6 +11,17 @@ const PROMPT = '你是答题助手\n\n题型：单选题';
 
 const OPENAI_PROVIDER = { baseUrl: 'https://api.openai.test/v1', apiKey: 'sk-test', auth: 'api-key' };
 
+/** 缺失字段的基准：九个字段全 null。 */
+const NULL_USAGE = {
+	inputTokens: null,
+	outputTokens: null,
+	reasoningTokens: null,
+	cachedTokens: null,
+	cost: null,
+	listCost: null,
+	billingSource: null
+};
+
 test('openai.buildRequest：URL、Bearer 头、body 形状、signal 透传', () => {
 	const signal = AbortSignal.timeout(1000);
 	const { url, init } = openai.buildRequest({
@@ -62,7 +73,7 @@ test('openai.parseResponse：文本、finishReason、usage、logprobs margin', (
 
 	assert.equal(parsed.text, '1');
 	assert.equal(parsed.finishReason, 'stop');
-	assert.deepEqual(parsed.usage, { inputTokens: 12, outputTokens: 1 });
+	assert.deepEqual(parsed.usage, { ...NULL_USAGE, inputTokens: 12, outputTokens: 1 });
 	assert.ok(Math.abs(parsed.margin - 0.3) < 1e-9, `margin=${parsed.margin}`);
 });
 
@@ -124,7 +135,7 @@ test('anthropic.parseResponse：拼接 text block，忽略非 text；margin 恒�
 
 	assert.equal(parsed.text, '1,3');
 	assert.equal(parsed.finishReason, 'end_turn');
-	assert.deepEqual(parsed.usage, { inputTokens: 9, outputTokens: 2 });
+	assert.deepEqual(parsed.usage, { ...NULL_USAGE, inputTokens: 9, outputTokens: 2 });
 	assert.equal(parsed.margin, null);
 
 	const truncated = anthropic.parseResponse({ content: [], stop_reason: 'max_tokens' });
@@ -159,7 +170,7 @@ test('gemini.parseResponse：拼接 parts，STOP / MAX_TOKENS 与空 content', (
 	});
 	assert.equal(stopped.text, '1,2');
 	assert.equal(stopped.finishReason, 'STOP');
-	assert.deepEqual(stopped.usage, { inputTokens: 8, outputTokens: 3 });
+	assert.deepEqual(stopped.usage, { ...NULL_USAGE, inputTokens: 8, outputTokens: 3 });
 	assert.equal(stopped.margin, null);
 
 	const truncated = gemini.parseResponse({ candidates: [{ content: { parts: [] }, finishReason: 'MAX_TOKENS' }] });
@@ -298,7 +309,7 @@ test('responses.parseResponse：output[] 拼接、output_text 回退、incomplet
 
 	assert.equal(parsed.text, '1,3');
 	assert.equal(parsed.finishReason, 'completed');
-	assert.deepEqual(parsed.usage, { inputTokens: 10, outputTokens: 2 });
+	assert.deepEqual(parsed.usage, { ...NULL_USAGE, inputTokens: 10, outputTokens: 2 });
 
 	assert.equal(responses.parseResponse({ status: 'completed', output_text: '2' }).text, '2', '网关便捷字段回退');
 
@@ -310,4 +321,132 @@ test('responses.parseResponse：output[] 拼接、output_text 回退、incomplet
 			}),
 		/responses_incomplete/
 	);
+});
+
+test('openai.parseResponse：完整 usage → 九字段（cached / reasoning / cost / list_cost / billing_source）', () => {
+	const parsed = openai.parseResponse({
+		choices: [{ message: { content: '1' }, finish_reason: 'stop' }],
+		usage: {
+			prompt_tokens: 35,
+			completion_tokens: 16,
+			prompt_tokens_details: { cached_tokens: 7 },
+			completion_tokens_details: { reasoning_tokens: 16 },
+			cost: 0,
+			opencode: { billing_source: 'go', list_cost: 0.00001485 }
+		}
+	});
+
+	assert.deepEqual(parsed.usage, {
+		inputTokens: 35,
+		outputTokens: 16,
+		reasoningTokens: 16,
+		cachedTokens: 7,
+		cost: 0,
+		listCost: 0.00001485,
+		billingSource: 'go'
+	});
+});
+
+test('anthropic.parseResponse：完整 usage → 九字段（reasoning 不提供，记 null）', () => {
+	const parsed = anthropic.parseResponse({
+		content: [{ type: 'text', text: '1' }],
+		stop_reason: 'end_turn',
+		usage: {
+			input_tokens: 35,
+			output_tokens: 16,
+			cache_read_input_tokens: 5,
+			cost: 0.0002,
+			opencode: { billing_source: 'byok', list_cost: 0.0003 }
+		}
+	});
+
+	assert.deepEqual(parsed.usage, {
+		inputTokens: 35,
+		outputTokens: 16,
+		reasoningTokens: null,
+		cachedTokens: 5,
+		cost: 0.0002,
+		listCost: 0.0003,
+		billingSource: 'byok'
+	});
+});
+
+test('gemini.parseResponse：完整 usageMetadata → 九字段（thoughts / cached 各自映射）', () => {
+	const parsed = gemini.parseResponse({
+		candidates: [{ content: { parts: [{ text: '1' }] }, finishReason: 'STOP' }],
+		usageMetadata: {
+			promptTokenCount: 35,
+			candidatesTokenCount: 16,
+			thoughtsTokenCount: 9,
+			cachedContentTokenCount: 4,
+			cost: 0,
+			opencode: { billing_source: 'free', list_cost: 0 }
+		}
+	});
+
+	assert.deepEqual(parsed.usage, {
+		inputTokens: 35,
+		outputTokens: 16,
+		reasoningTokens: 9,
+		cachedTokens: 4,
+		cost: 0,
+		listCost: 0,
+		billingSource: 'free'
+	});
+});
+
+test('responses.parseResponse：完整 usage → 九字段（input/output 的 details 各自映射）', () => {
+	const parsed = responses.parseResponse({
+		status: 'completed',
+		output: [{ type: 'message', content: [{ type: 'output_text', text: '1' }] }],
+		usage: {
+			input_tokens: 35,
+			output_tokens: 16,
+			output_tokens_details: { reasoning_tokens: 16 },
+			input_tokens_details: { cached_tokens: 3 },
+			cost: 0.001,
+			opencode: { billing_source: 'balance', list_cost: 0.0012 }
+		}
+	});
+
+	assert.deepEqual(parsed.usage, {
+		inputTokens: 35,
+		outputTokens: 16,
+		reasoningTokens: 16,
+		cachedTokens: 3,
+		cost: 0.001,
+		listCost: 0.0012,
+		billingSource: 'balance'
+	});
+});
+
+test('四种协议：usage 缺失 → 九字段全 null（不能记 0）', () => {
+	assert.deepEqual(openai.parseResponse({ choices: [{ message: { content: '1' } }] }).usage, NULL_USAGE);
+	assert.deepEqual(
+		anthropic.parseResponse({ content: [{ type: 'text', text: '1' }] }).usage,
+		NULL_USAGE
+	);
+	assert.deepEqual(gemini.parseResponse({ candidates: [{ content: { parts: [{ text: '1' }] } }] }).usage, NULL_USAGE);
+	assert.deepEqual(responses.parseResponse({ status: 'completed', output_text: '1' }).usage, NULL_USAGE);
+});
+
+test('四种协议：usage 字段不是 number → null，不做 Number() 强转', () => {
+	const openaiUsage = openai.parseResponse({
+		choices: [{ message: { content: '1' } }],
+		usage: {
+			prompt_tokens: '35',
+			completion_tokens: true,
+			prompt_tokens_details: { cached_tokens: '7' },
+			completion_tokens_details: { reasoning_tokens: null },
+			cost: '0',
+			opencode: { billing_source: 1, list_cost: '0.001' }
+		}
+	}).usage;
+	assert.deepEqual(openaiUsage, NULL_USAGE);
+
+	const anthropicUsage = anthropic.parseResponse({
+		content: [{ type: 'text', text: '1' }],
+		usage: { input_tokens: '35', output_tokens: {}, cache_read_input_tokens: undefined, cost: '0' }
+	}).usage;
+	assert.deepEqual(anthropicUsage, NULL_USAGE);
 });

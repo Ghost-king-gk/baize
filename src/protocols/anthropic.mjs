@@ -7,6 +7,7 @@ import {
 	DEFAULT_CLAUDE_CODE_USER_AGENT
 } from '../oauth.mjs';
 import { mergeHeaders, ProtocolError } from './http.mjs';
+import { costFields, numberOrNull } from './usage.mjs';
 
 export const ANTHROPIC_VERSION = '2023-06-01';
 export { OAUTH_BETA, CLAUDE_CODE_BETA, ANTHROPIC_OAUTH_BETA } from '../oauth.mjs';
@@ -89,11 +90,13 @@ export function buildRequest(input) {
 
 /**
  * @param {any} json
- * @returns {{text: string, finishReason: string | null, usage: {inputTokens: number | null, outputTokens: number | null}, margin: null}}
+ * @returns {{text: string, finishReason: string | null, usage: import('./usage.mjs').Usage, margin: null}}
  */
 export function parseResponse(json) {
 	const content = json?.content;
 	if (!Array.isArray(content)) throw new ProtocolError('response_without_content', { retryable: true });
+
+	const usage = json?.usage;
 
 	const text = content
 		.filter((block) => block?.type === 'text' && typeof block.text === 'string')
@@ -104,8 +107,12 @@ export function parseResponse(json) {
 		text,
 		finishReason: typeof json?.stop_reason === 'string' ? json.stop_reason : null,
 		usage: {
-			inputTokens: typeof json?.usage?.input_tokens === 'number' ? json.usage.input_tokens : null,
-			outputTokens: typeof json?.usage?.output_tokens === 'number' ? json.usage.output_tokens : null
+			inputTokens: numberOrNull(usage?.input_tokens),
+			outputTokens: numberOrNull(usage?.output_tokens),
+			// Anthropic Messages 不返回 reasoning token 计数。
+			reasoningTokens: null,
+			cachedTokens: numberOrNull(usage?.cache_read_input_tokens),
+			...costFields(usage)
 		},
 		// Anthropic 不提供 logprobs。
 		margin: null

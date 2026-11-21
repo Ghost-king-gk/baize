@@ -18,6 +18,21 @@ import { hashTitle } from './log.mjs';
 
 /** @typedef {'single'|'multiple'|'judgement'|'completion'|'unknown'} QuestionType */
 
+/**
+ * 一次采样的结果。provider.ask 可能不带 usage（如 mock），字段一律可选。
+ * @typedef {{
+ *   order: number[],
+ *   result: {
+ *     letters: number[],
+ *     answers?: string[],
+ *     margin?: number,
+ *     provider?: string,
+ *     model?: string,
+ *     usage?: import('./protocols/usage.mjs').Usage
+ *   }
+ * }} Sample
+ */
+
 export const REASONS = {
 	lowConfidence: 'low_confidence',
 	invalidOutput: 'invalid_output',
@@ -25,6 +40,44 @@ export const REASONS = {
 	unsupportedImages: 'unsupported_images',
 	invalidRequest: 'invalid_request'
 };
+
+/**
+ * 一次答题会调用 K 次模型，每次都是一次真实计费：费用与 token 逐字段求和。
+ *
+ * 任一样本缺该字段 → 整项 null：部分已知的总和不等于完整账单，不能冒充精确值。
+ * billing_source 不是数值：只有一个取值才记，混合链上出现多个来源时记 null。
+ *
+ * @param {Sample[]} samples
+ */
+function sumUsage(samples) {
+	/** @param {(usage: any) => any} pick */
+	const total = (pick) => {
+		let sum = 0;
+		for (const sample of samples) {
+			const value = pick(sample?.result?.usage);
+			if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+			sum += value;
+		}
+		return samples.length > 0 ? sum : null;
+	};
+
+	/** @type {Set<string>} */
+	const sources = new Set();
+	for (const sample of samples) {
+		const source = sample?.result?.usage?.billingSource;
+		if (typeof source === 'string' && source.length > 0) sources.add(source);
+	}
+
+	return {
+		inputTokens: total((usage) => usage?.inputTokens),
+		outputTokens: total((usage) => usage?.outputTokens),
+		reasoningTokens: total((usage) => usage?.reasoningTokens),
+		cachedTokens: total((usage) => usage?.cachedTokens),
+		cost: total((usage) => usage?.cost),
+		listCost: total((usage) => usage?.listCost),
+		billingSource: sources.size === 1 ? [...sources][0] : null
+	};
+}
 
 /**
  * @param {{
@@ -106,6 +159,14 @@ export function createService(config) {
 			options_n: options.length,
 			provider: provider.name ?? 'unknown',
 			model: provider.model ?? '',
+			// 费用与 token 明细：未知一律 null（0 表示免费，两者不能混用）。
+			input_tokens: null,
+			output_tokens: null,
+			reasoning_tokens: null,
+			cached_tokens: null,
+			cost: null,
+			list_cost: null,
+			billing_source: null,
 			letters: null,
 			margin: null,
 			votes: {},
@@ -138,7 +199,7 @@ export function createService(config) {
 
 		const isCompletion = effectiveType === 'completion';
 
-		/** @type {{order: number[], result: {letters: number[], answers?: string[], margin?: number}}[]} */
+		/** @type {Sample[]} */
 		let samples;
 		try {
 			samples = await Promise.all(
@@ -154,7 +215,17 @@ export function createService(config) {
 			return finish({ ok: false, reason });
 		}
 
-		/** @param {{result: {letters?: number[], answers?: string[]}}} sample */
+		// K 次采样都真实计费：在投票前先把明细写进埋点，弃权也能反映已花的钱。
+		const usage = sumUsage(samples);
+		record.input_tokens = usage.inputTokens;
+		record.output_tokens = usage.outputTokens;
+		record.reasoning_tokens = usage.reasoningTokens;
+		record.cached_tokens = usage.cachedTokens;
+		record.cost = usage.cost;
+		record.list_cost = usage.listCost;
+		record.billing_source = usage.billingSource;
+
+		/** @param {Sample} sample */
 		const keyOf = (sample) => {
 			if (isCompletion) return (sample.result.answers ?? []).join('\u0000');
 			return [...(sample.result.letters ?? [])].sort((a, b) => a - b).join(',');

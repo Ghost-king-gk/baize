@@ -196,3 +196,91 @@ test('模型给出超过单选数量的序号 → invalid_output（provider 已�
 	const result = await service({ title: 't', type: 'single', options: OPTIONS });
 	assert.deepEqual(result, { ok: false, reason: 'invalid_output' });
 });
+
+test('埋点：记录费用与 token 明细，0 与 null 不混用', async () => {
+	const { records, logger } = collectLogs();
+	const usage = {
+		inputTokens: 35,
+		outputTokens: 16,
+		reasoningTokens: 16,
+		cachedTokens: 0,
+		cost: 0,
+		listCost: 0.00001485,
+		billingSource: 'go'
+	};
+	const service = createService({ provider: stubProvider(() => ({ letters: [1], usage })), k: 1, logger });
+
+	await service({ title: 't', type: 'single', options: OPTIONS });
+	const record = records[0];
+	assert.equal(record.input_tokens, 35);
+	assert.equal(record.output_tokens, 16);
+	assert.equal(record.reasoning_tokens, 16);
+	assert.equal(record.cached_tokens, 0, '缓存命中 0 要记 0，不能变 null');
+	assert.equal(record.cost, 0, '免费是 0，不是 null');
+	assert.equal(record.list_cost, 0.00001485);
+	assert.equal(record.billing_source, 'go');
+});
+
+test('埋点：provider 未返回 usage → 费用与 token 全为 null', async () => {
+	const { records, logger } = collectLogs();
+	const service = createService({ provider: stubProvider(() => ({ letters: [1] })), k: 1, logger });
+
+	await service({ title: 't', type: 'single', options: OPTIONS });
+	const record = records[0];
+	for (const field of [
+		'input_tokens',
+		'output_tokens',
+		'reasoning_tokens',
+		'cached_tokens',
+		'cost',
+		'list_cost',
+		'billing_source'
+	]) {
+		assert.equal(record[field], null, `${field} 应为 null`);
+	}
+});
+
+test('埋点：K 次采样按次累加；任一样本缺某字段则该项 null', async () => {
+	const { records, logger } = collectLogs();
+	const usage = {
+		inputTokens: 10,
+		outputTokens: 4,
+		reasoningTokens: 4,
+		cachedTokens: 2,
+		cost: 0.5,
+		listCost: 0.25,
+		billingSource: 'go'
+	};
+
+	const service = createService({
+		provider: stubProvider(() => ({ letters: [1], usage: { ...usage } })),
+		k: 3,
+		logger
+	});
+	await service({ title: 't', type: 'single', options: OPTIONS });
+
+	const record = records[0];
+	assert.equal(record.input_tokens, 30);
+	assert.equal(record.output_tokens, 12);
+	assert.equal(record.reasoning_tokens, 12);
+	assert.equal(record.cached_tokens, 6);
+	assert.equal(record.cost, 1.5);
+	assert.equal(record.list_cost, 0.75);
+	assert.equal(record.billing_source, 'go');
+
+	// 一次样本没报 cost：总和不是完整账单 → cost=null，其余字段仍累加。
+	const partial = createService({
+		provider: stubProvider((call) => {
+			const { cost, ...withoutCost } = usage;
+			return { letters: [1], usage: call === 2 ? withoutCost : usage };
+		}),
+		k: 3,
+		logger
+	});
+	await partial({ title: 't', type: 'single', options: OPTIONS });
+
+	const partialRecord = records[1];
+	assert.equal(partialRecord.cost, null);
+	assert.equal(partialRecord.input_tokens, 30);
+	assert.equal(partialRecord.billing_source, 'go');
+});

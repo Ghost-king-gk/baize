@@ -12,6 +12,7 @@
 import { InvalidOutputError } from '../format.mjs';
 import { CODEX_ORIGINATOR } from '../oauth.mjs';
 import { mergeHeaders, ProtocolError } from './http.mjs';
+import { costFields, numberOrNull } from './usage.mjs';
 
 /**
  * @param {{
@@ -75,7 +76,7 @@ export function buildRequest(input) {
 
 /**
  * @param {any} json
- * @returns {{text: string, finishReason: string | null, usage: {inputTokens: number | null, outputTokens: number | null}, margin: null}}
+ * @returns {{text: string, finishReason: string | null, usage: import('./usage.mjs').Usage, margin: null}}
  */
 export function parseResponse(json) {
 	const status = typeof json?.status === 'string' ? json.status : null;
@@ -103,12 +104,17 @@ export function parseResponse(json) {
 	// 部分网关（或精简模式）只返回便捷字段 output_text。
 	if (!text && typeof json?.output_text === 'string') text = json.output_text;
 
+	const usage = json?.usage;
+
 	return {
 		text,
 		finishReason: status,
 		usage: {
-			inputTokens: typeof json?.usage?.input_tokens === 'number' ? json.usage.input_tokens : null,
-			outputTokens: typeof json?.usage?.output_tokens === 'number' ? json.usage.output_tokens : null
+			inputTokens: numberOrNull(usage?.input_tokens),
+			outputTokens: numberOrNull(usage?.output_tokens),
+			reasoningTokens: numberOrNull(usage?.output_tokens_details?.reasoning_tokens),
+			cachedTokens: numberOrNull(usage?.input_tokens_details?.cached_tokens),
+			...costFields(usage)
 		},
 		// Responses API 不提供本服务可用的 logprobs。
 		margin: null

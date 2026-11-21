@@ -2,6 +2,7 @@
 /** OpenAI Chat Completions 线格式。 */
 
 import { mergeHeaders, ProtocolError } from './http.mjs';
+import { costFields, numberOrNull } from './usage.mjs';
 
 /**
  * @param {{
@@ -71,11 +72,13 @@ export function marginFromChoice(choice) {
 
 /**
  * @param {any} json
- * @returns {{text: string, finishReason: string | null, usage: {inputTokens: number | null, outputTokens: number | null}, margin: number | null}}
+ * @returns {{text: string, finishReason: string | null, usage: import('./usage.mjs').Usage, margin: number | null}}
  */
 export function parseResponse(json) {
 	const choice = json?.choices?.[0];
 	if (!choice) throw new ProtocolError('response_without_choices', { retryable: true });
+
+	const usage = json?.usage;
 
 	const content = choice.message?.content;
 	let text = '';
@@ -93,8 +96,11 @@ export function parseResponse(json) {
 		text,
 		finishReason: typeof choice.finish_reason === 'string' ? choice.finish_reason : null,
 		usage: {
-			inputTokens: typeof json?.usage?.prompt_tokens === 'number' ? json.usage.prompt_tokens : null,
-			outputTokens: typeof json?.usage?.completion_tokens === 'number' ? json.usage.completion_tokens : null
+			inputTokens: numberOrNull(usage?.prompt_tokens),
+			outputTokens: numberOrNull(usage?.completion_tokens),
+			reasoningTokens: numberOrNull(usage?.completion_tokens_details?.reasoning_tokens),
+			cachedTokens: numberOrNull(usage?.prompt_tokens_details?.cached_tokens),
+			...costFields(usage)
 		},
 		margin: marginFromChoice(choice)
 	};

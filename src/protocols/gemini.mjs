@@ -2,6 +2,7 @@
 /** Google Gemini generateContent 线格式。 */
 
 import { mergeHeaders, ProtocolError } from './http.mjs';
+import { costFields, numberOrNull } from './usage.mjs';
 
 /**
  * @param {{
@@ -47,11 +48,13 @@ export function buildRequest(input) {
 
 /**
  * @param {any} json
- * @returns {{text: string, finishReason: string | null, usage: {inputTokens: number | null, outputTokens: number | null}, margin: null}}
+ * @returns {{text: string, finishReason: string | null, usage: import('./usage.mjs').Usage, margin: null}}
  */
 export function parseResponse(json) {
 	const candidate = json?.candidates?.[0];
 	if (!candidate) throw new ProtocolError('response_without_candidates', { retryable: true });
+
+	const usage = json?.usageMetadata;
 
 	const parts = candidate.content?.parts;
 	const text = Array.isArray(parts) ? parts.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('') : '';
@@ -61,12 +64,11 @@ export function parseResponse(json) {
 		// STOP 正常；MAX_TOKENS 由 router 视为截断。
 		finishReason: typeof candidate.finishReason === 'string' ? candidate.finishReason : null,
 		usage: {
-			inputTokens:
-				typeof json?.usageMetadata?.promptTokenCount === 'number' ? json.usageMetadata.promptTokenCount : null,
-			outputTokens:
-				typeof json?.usageMetadata?.candidatesTokenCount === 'number'
-					? json.usageMetadata.candidatesTokenCount
-					: null
+			inputTokens: numberOrNull(usage?.promptTokenCount),
+			outputTokens: numberOrNull(usage?.candidatesTokenCount),
+			reasoningTokens: numberOrNull(usage?.thoughtsTokenCount),
+			cachedTokens: numberOrNull(usage?.cachedContentTokenCount),
+			...costFields(usage)
 		},
 		// Gemini 不提供 logprobs。
 		margin: null

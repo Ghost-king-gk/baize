@@ -360,17 +360,31 @@ OCS 的匹配器对答案字符串有硬性要求，格式错了就是「搜不�
 每题一行 JSONL，追加到 `logs/answers.jsonl`（已 gitignore）：
 
 ```json
-{"ts":"2026-11-20T12:00:00.000Z","type":"single","title_len":7,"title_hash":"9f2c...","options_n":4,"provider":"openai","model":"...","letters":[3],"margin":null,"votes":{"3":3},"ms":812,"outcome":"ok","effective_type":"single"}
+{"ts":"2026-11-20T12:00:00.000Z","type":"single","title_len":7,"title_hash":"9f2c...","options_n":4,"provider":"opencode","model":"...","input_tokens":35,"output_tokens":16,"reasoning_tokens":16,"cached_tokens":0,"cost":0,"list_cost":0.00001485,"billing_source":"go","letters":[3],"margin":null,"votes":{"3":3},"ms":812,"outcome":"ok","effective_type":"single"}
 ```
 
-- 只记题干长度 + sha256 前 16 位，**不记题干原文**。
+费用与 token 明细的取值来源（四种协议字段名不同，统一成同一组日志字段）：
+
+| 字段 | 来源 | 缺失时 |
+| --- | --- | --- |
+| `input_tokens` | openai `usage.prompt_tokens`；anthropic `usage.input_tokens`；gemini `usageMetadata.promptTokenCount`；responses `usage.input_tokens` | `null` |
+| `output_tokens` | openai `usage.completion_tokens`；anthropic `usage.output_tokens`；gemini `usageMetadata.candidatesTokenCount`；responses `usage.output_tokens` | `null` |
+| `reasoning_tokens` | openai `usage.completion_tokens_details.reasoning_tokens`；gemini `usageMetadata.thoughtsTokenCount`；responses `usage.output_tokens_details.reasoning_tokens`；anthropic 不提供 | `null` |
+| `cached_tokens` | openai `usage.prompt_tokens_details.cached_tokens`；anthropic `usage.cache_read_input_tokens`；gemini `usageMetadata.cachedContentTokenCount`；responses `usage.input_tokens_details.cached_tokens` | `null` |
+| `cost` | `usage.cost` / `usageMetadata.cost`：本次实际扣费（美元） | `null` |
+| `list_cost` | `opencode.list_cost`：按公开标价折算的费用 | `null` |
+| `billing_source` | `opencode.billing_source`：`go` / `go-plus` / `balance` / `free` / `byok` | `null` |
+
+- **`cost` 是实际计费，`list_cost` 是标价**：订阅额度内 `cost` 可能是 0，而 `list_cost` 仍是这次调用按价目表值多少钱；`byok` 走自己的 key 时实际计费也可能是 0。两者都为 0 表示确实免费，`null` 表示供应商没给这个字段——看板不要把它们合并，更不要把 `null` 当 0。
+- K 次自洽采样每次都是真实调用，日志按次累加（`cost` 是本题总花费，token 是总用量）。任一样本缺该字段则整项记 `null`：部分已知的总和不等于完整账单。混合链上出现多个 `billing_source` 时也记 `null`。
+- 只记题干长度 + sha256 前 16 位，**不记题干原文**；token 明细是计数，同样不含题目或答案正文。
 - 填空题的 `votes` 只记「第几个样本出现几次」，避免把答案正文写进日志。
-- 写日志失败不会影响答题主流程。
+- 写日志失败不会影响答题主流程。旧日志行没有这些字段，看板应显示为未知（null），不是免费。
 
 ## 测试与评测
 
 ```bash
-node --test                 # 86 个测试：格式化、prompt、protocols、router、config、provider、service、HTTP、契约
+node --test                 # 116 个测试：格式化、prompt、protocols、router、config、provider、service、HTTP、契约
 node --test eval/format.test.mjs   # 真实用例评测（也在 node --test 里）
 ```
 
