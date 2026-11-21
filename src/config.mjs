@@ -5,11 +5,16 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadProviderTable, resolveProvider } from './providers.mjs';
+
 /** 仓库根目录（src/ 的上一级）。 */
 export const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 /** 服务只绑定本机回环地址，且故意不提供环境变量覆盖。 */
 export const HOST = '127.0.0.1';
+
+/** 默认供应商预设表。 */
+export const DEFAULT_PROVIDERS_FILE = path.join(ROOT, 'config', 'providers.json');
 
 /**
  * 加载仓库根目录的 .env（Node 内置 process.loadEnvFile，零依赖）。
@@ -60,38 +65,63 @@ function floatFromEnv(value, fallback, min, max, name) {
 }
 
 /**
+ * ANSWERER_CHAIN 优先；未设置时退回 ANSWERER_PROVIDER（兼容旧配置）。
+ * 逗号分隔、去空白、按出现顺序去重。
+ * @param {Record<string, string | undefined>} env
+ * @returns {string[]}
+ */
+export function parseProviderChain(env) {
+	const raw = String(env.ANSWERER_CHAIN ?? '').trim();
+	const parts = raw ? raw.split(',') : [String(env.ANSWERER_PROVIDER ?? 'openai')];
+
+	/** @type {string[]} */
+	const chain = [];
+	for (const part of parts) {
+		const id = part.trim();
+		if (!id || chain.includes(id)) continue;
+		chain.push(id);
+	}
+	if (chain.length === 0) throw new Error('ANSWERER_CHAIN 不能为空');
+	return chain;
+}
+
+/**
  * @param {Record<string, string | undefined>} env
  */
 export function loadConfig(env = process.env) {
-	const provider = String(env.ANSWERER_PROVIDER ?? 'openai').trim().toLowerCase();
-	if (provider !== 'openai' && provider !== 'mock') {
-		throw new Error(`ANSWERER_PROVIDER 只支持 openai 或 mock，收到: ${provider}`);
-	}
+	const rawChain = parseProviderChain(env);
 
-	const baseUrl = String(env.ANSWERER_BASE_URL ?? '')
-		.trim()
-		.replace(/\/+$/, '');
-	const apiKey = String(env.ANSWERER_API_KEY ?? '').trim();
-	const model = String(env.ANSWERER_MODEL ?? '').trim();
+	const providersFile = path.resolve(
+		ROOT,
+		String(env.ANSWERER_PROVIDERS_FILE ?? '').trim() || DEFAULT_PROVIDERS_FILE
+	);
+	const table = loadProviderTable({ file: providersFile }).providers;
 
-	if (provider === 'openai') {
-		const missing = [
-			['ANSWERER_BASE_URL', baseUrl],
-			['ANSWERER_API_KEY', apiKey],
-			['ANSWERER_MODEL', model]
-		]
-			.filter(([, value]) => !value)
-			.map(([name]) => name);
-		if (missing.length > 0) {
-			throw new Error(`openai provider 缺少环境变量: ${missing.join(', ')}（可复制 .env.example 为 .env）`);
-		}
-	}
+	// 兼容旧配置的大小写写法（以前 ANSWERER_PROVIDER 会被 toLowerCase）。
+	const chain = rawChain.map((id) => {
+		if (id === 'mock' || table[id]) return id;
+		const lower = id.toLowerCase();
+		if (lower === 'mock' || table[lower]) return lower;
+		return id;
+	});
+
+	// 旧的 ANSWERER_BASE_URL / ANSWERER_API_KEY 继续生效：只覆盖链上第一家。
+	const providers = chain.map((id, index) =>
+		resolveProvider(id, table, env, {
+			baseUrl: index === 0 ? env.ANSWERER_BASE_URL : undefined,
+			apiKey: index === 0 ? env.ANSWERER_API_KEY : undefined
+		})
+	);
+
+	const first = providers[0];
 
 	return {
-		provider,
-		baseUrl,
-		apiKey,
-		model,
+		provider: first.id,
+		chain,
+		providers,
+		baseUrl: first.baseUrl,
+		apiKey: first.apiKey,
+		model: first.model,
 		port: intFromEnv(env.ANSWERER_PORT, 8787, 1, 65535, 'ANSWERER_PORT'),
 		k: intFromEnv(env.ANSWERER_K, 3, 1, 10, 'ANSWERER_K'),
 		marginThreshold: floatFromEnv(env.ANSWERER_MARGIN, 0.15, 0, 1, 'ANSWERER_MARGIN'),

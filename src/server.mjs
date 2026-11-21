@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 
 import { HOST, loadConfig, loadDotenv } from './config.mjs';
 import { createJsonlLogger } from './log.mjs';
-import { createProvider } from './provider.mjs';
+import { MockProvider } from './provider.mjs';
+import { createRouter } from './router.mjs';
 import { createService } from './service.mjs';
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
@@ -83,12 +84,14 @@ function readBody(req, limit) {
  * @param {{
  *   answer: (payload: any) => Promise<{ok: true, answer: string} | {ok: false, reason: string}>,
  *   provider?: string,
+ *   chain?: string[],
  *   model?: string,
  *   maxBodyBytes?: number
  * }} options
  */
 export function createServer(options) {
-	const { answer, provider = 'unknown', model = '', maxBodyBytes = MAX_BODY_BYTES } = options;
+	const { answer, provider = 'unknown', chain, model = '', maxBodyBytes = MAX_BODY_BYTES } = options;
+	const chainList = Array.isArray(chain) && chain.length > 0 ? [...chain] : [provider];
 
 	return http.createServer((req, res) => {
 		applyCors(res);
@@ -104,7 +107,14 @@ export function createServer(options) {
 
 			if (url.pathname === '/health') {
 				if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method_not_allowed' });
-				return sendJson(res, 200, { ok: true, service: 'baize', compat: COMPAT, provider, model });
+				return sendJson(res, 200, {
+					ok: true,
+					service: 'baize',
+					compat: COMPAT,
+					provider: chainList[0],
+					chain: chainList,
+					model
+				});
 			}
 
 			if (url.pathname === '/answer') {
@@ -164,7 +174,13 @@ export function createServer(options) {
 export function start(env = process.env) {
 	loadDotenv();
 	const config = loadConfig(env);
-	const provider = createProvider(config, env);
+	const provider = createRouter({
+		providers: config.providers,
+		chain: config.chain,
+		timeoutMs: config.timeoutMs,
+		logprobs: config.logprobs,
+		mockProvider: MockProvider.fromEnv(env)
+	});
 	const logger = createJsonlLogger({ file: config.logFile, enabled: config.logEnabled });
 	const answer = createService({
 		provider,
@@ -173,7 +189,12 @@ export function start(env = process.env) {
 		logger
 	});
 
-	const server = createServer({ answer, provider: provider.name, model: provider.model });
+	const server = createServer({
+		answer,
+		provider: config.chain[0],
+		chain: config.chain,
+		model: provider.model
+	});
 
 	server.on('error', (error) => {
 		console.error(`[baize] 启动失败: ${error.message}`);
@@ -182,7 +203,7 @@ export function start(env = process.env) {
 
 	server.listen(config.port, HOST, () => {
 		console.log(
-			`[baize] listening on http://${HOST}:${config.port}  provider=${provider.name}  model=${provider.model}  k=${config.k}`
+			`[baize] listening on http://${HOST}:${config.port}  chain=${config.chain.join('>')}  model=${provider.model}  k=${config.k}`
 		);
 		return server;
 	});

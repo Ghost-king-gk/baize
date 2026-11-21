@@ -7,7 +7,7 @@
 OCS（网课助手）的 **AI 题库兼容层**。它自己不做题库，只做三件事：
 
 1. 接住 OCS 发来的 `POST /answer`（题干 + 题型 + 选项）；
-2. 问一个 OpenAI 兼容的 LLM，只让它输出选项序号；
+2. 按 `ANSWERER_CHAIN` 依次问 OpenAI / Anthropic / Google（或任意 OpenAI 兼容网关）的 LLM，只让它输出选项序号；
 3. 把序号翻译回 **OCS 匹配器认得的答案字符串**（选项原文 / `#` 分隔 / 判断题词表 token）。
 
 零运行时依赖，只用 Node 内置模块（`node:http`、`node:test`、全局 `fetch`），没有 `npm install` 步骤。
@@ -28,7 +28,7 @@ ANSWERER_PROVIDER=mock ANSWERER_MOCK_LETTERS=3 node src/server.mjs
 看到这一行就成功了：
 
 ```
-[baize] listening on http://127.0.0.1:8787  provider=openai  model=...
+[baize] listening on http://127.0.0.1:8787  chain=openai  model=...  k=3
 ```
 
 冒烟测试：
@@ -39,6 +39,103 @@ curl -s -X POST 127.0.0.1:8787/answer \
   -d '{"title":"1+2=?","type":"single","options":"A. 1\nB. 2\nC. 3\nD. 4"}'
 # {"ok":true,"answer":"C. 3"}
 ```
+
+## 多 provider 与故障转移
+
+供应商是**数据**：预设表在 [`config/providers.json`](config/providers.json)，本地覆盖放 `config/providers.local.json`（已 gitignore）。三种线格式都按官方 API 手写：
+
+| id | 协议 | baseUrl | 密钥环境变量 | 需填 model |
+| --- | --- | --- | --- | --- |
+| `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` | 是 |
+| `anthropic` | anthropic | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | 是 |
+| `google` | gemini | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | 是 |
+| `deepseek` | openai | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | 是 |
+| `glm` | openai | `https://open.bigmodel.cn/api/paas/v4` | `ZHIPU_API_KEY` | 是 |
+| `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | 是 |
+| `minimax` | openai | `https://api.minimax.chat/v1` | `MINIMAX_API_KEY` | 是 |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | 是 |
+| `opencode-go` | openai | 空，必须自己填 | `OPENCODE_GO_API_KEY` | 是 |
+| `ollama` | openai | `http://127.0.0.1:11434/v1` | 无（null） | 是 |
+| `lmstudio` | openai | `http://127.0.0.1:1234/v1` | 无（null） | 是 |
+
+预设表**绝不写模型 ID**：模型只能来自全局 `ANSWERER_MODEL`，或在 `providers.local.json` 里按 provider 覆盖（不同家的模型名通常不同）。
+
+`ANSWERER_CHAIN` 是逗号分隔的 provider id，按顺序尝试；未设置时退回 `ANSWERER_PROVIDER`（兼容旧的单 provider 配置）：
+
+```bash
+# 各家的模型名不同：在 config/providers.local.json 里按 provider 写 model
+ANSWERER_CHAIN=openai,deepseek node src/server.mjs
+```
+
+故障转移语义：
+
+| 情况 | 行为 |
+| --- | --- |
+| 网络错误、超时、HTTP 408 / 429 / 5xx、响应不是 JSON | 记一次失败，换下一家 |
+| HTTP 400 / 401 / 403 / 404 及其余 4xx | **立即抛出**，不继续烧别家额度 |
+| HTTP 2xx 但内容截断 / 空输出 / 序号非法 | 不切下一家（供应商已经应答），按 `invalid_output` 重试一次 |
+| 单 provider 连续失败 3 次 | 进程内熔断 60 秒，期间直接跳过；冷却后自动放行 |
+
+切换日志只打印 provider id + 状态码，不打印 key / 请求体：
+
+```
+[baize] provider=openai status=429 -> fallback=deepseek
+[baize] provider=deepseek status=network -> fallback=mock
+[baize] provider=openai circuit=open
+```
+
+`/health` 返回当前链：`{"ok":true,"service":"baize","compat":"...","provider":"openai","chain":["openai","deepseek"],"model":"..."}`。
+
+### 自定义 provider
+
+在 `config/providers.local.json` 里写 JSON 对象，按 id **浅合并**到预设表（用户值优先），可以直接改写预设，也可以追加新网关：
+
+```json
+{
+	"openai": {
+		"baseUrl": "https://my-proxy.example.com/v1",
+		"keyEnv": "MY_PROXY_KEY",
+		"model": "gpt-4.1-mini"
+	},
+	"my-gateway": {
+		"label": "我的网关",
+		"protocol": "openai",
+		"baseUrl": "https://gateway.example.com/v1",
+		"keyEnv": "MY_GATEWAY_API_KEY",
+		"model": "some-model"
+	}
+}
+```
+
+然后把 `my-gateway` 加进 `ANSWERER_CHAIN`。常规供应商的 `protocol` 只能是 `openai` / `anthropic` / `gemini`（OAuth 两种见下）；`keyEnv: null` 表示本地服务无需鉴权；`baseUrl` 留空会在启动时报错，而不是悄悄请求错误地址。
+
+### 订阅 OAuth（experimental，默认关闭）
+
+预设表里**没有** OAuth 供应商，只有你显式写进 `providers.local.json` 才会启用：
+
+```json
+{
+	"claude-oauth": {
+		"label": "Claude 订阅",
+		"protocol": "anthropic-oauth",
+		"baseUrl": "https://api.anthropic.com/v1",
+		"keyEnv": "ANTHROPIC_OAUTH_TOKEN",
+		"model": "<你的 Claude 订阅模型 id>"
+	},
+	"codex-oauth": {
+		"label": "OpenAI 订阅",
+		"protocol": "openai-oauth",
+		"baseUrl": "https://api.openai.com/v1",
+		"keyEnv": "OPENAI_OAUTH_TOKEN",
+		"model": "<你的 OpenAI 订阅模型 id>"
+	}
+}
+```
+
+- `anthropic-oauth` 从 `ANTHROPIC_OAUTH_TOKEN` 取 token；未设置时只读 `~/.claude/.credentials.json` 的 access token，不会扫描其它凭据目录。请求用 `Authorization: Bearer` + `anthropic-version` + `anthropic-beta: oauth-2025-04-20`。
+- `openai-oauth` 从 `OPENAI_OAUTH_TOKEN` 取 token，仍走 `chat/completions`。
+
+**风险自负**：这类 token 属于订阅客户端（Claude Code / Codex 等），拿它驱动第三方服务可能违反供应商条款，也可能随时被吊销或改协议。baize 不代管账号，出问题请自己承担。
 
 ## 接入 OCS
 
@@ -104,7 +201,7 @@ curl -s -X POST 127.0.0.1:8787/answer \
 
 `ok:false` 的业务弃权仍返回 HTTP 200；只有 `invalid_request` 返回 400。
 
-`GET /health` 用于探活：`{"ok":true,"service":"baize","compat":"ocsjs 5.4.2 @ 09628b7","provider":"...","model":"..."}`。
+`GET /health` 用于探活：`{"ok":true,"service":"baize","compat":"ocsjs 5.4.2 @ 09628b7","provider":"...","chain":["..."],"model":"..."}`。`provider` 是链上第一家，不泄露任何密钥。
 
 ## 答案格式（本项目最核心的部分）
 
@@ -126,7 +223,7 @@ OCS 的匹配器对答案字符串有硬性要求，格式错了就是「搜不�
 
 ## 模型调用与自洽采样
 
-- `POST {ANSWERER_BASE_URL}/chat/completions`，`temperature: 0`，`max_tokens: 32`（填空 600），不流式、无工具。
+- 每家 provider 按自己的官方线格式发请求：OpenAI `POST {baseUrl}/chat/completions`、Anthropic `POST {baseUrl}/messages`、Gemini `POST {baseUrl}/models/{model}:generateContent`；统一 `temperature: 0`，`max_tokens: 32`（填空 600），不流式、无工具。
 - prompt 只要求输出序号：`3` 或 `1,3`；选项以 `1) 2) 3)` 展示，**模型看不到也不需要输出 A/B/C**。
 - 同一题并行打 K 次（`Promise.all`，墙钟≈一次），每次**独立打乱选项顺序**（Fisher-Yates，同时消位置偏置），模型输出映射回原始下标后取多数票。
 - K 次里没有过半共识（`winner.count * 2 <= K`）→ `low_confidence`。
@@ -137,19 +234,21 @@ OCS 的匹配器对答案字符串有硬性要求，格式错了就是「搜不�
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `ANSWERER_PROVIDER` | `openai` | `openai` 或 `mock`（不联网，返回预置答案） |
-| `ANSWERER_BASE_URL` | 空 | OpenAI 兼容接口，填到 `/v1` 这一层 |
-| `ANSWERER_API_KEY` | 空 | 只从环境读，不落盘、不进日志 |
-| `ANSWERER_MODEL` | 空 | 模型名 |
+| `ANSWERER_CHAIN` | 空 | 故障转移链，逗号分隔的 provider id（如 `openai,deepseek,ollama`）；优先于 `ANSWERER_PROVIDER` |
+| `ANSWERER_PROVIDER` | `openai` | 单 provider 兼容写法；`mock` 不联网，返回预置答案 |
+| `ANSWERER_PROVIDERS_FILE` | `config/providers.json` | 供应商预设表路径；同目录的 `providers.local.json` 会自动合并 |
+| `ANSWERER_MODEL` | 空 | 全局模型名；provider 条目里的 `model` 优先 |
+| `ANSWERER_BASE_URL` | 空 | 旧配置：只覆盖链上第一家的 baseUrl |
+| `ANSWERER_API_KEY` | 空 | 旧配置：只覆盖链上第一家的 key；其余 provider 用各自的 `keyEnv` |
 | `ANSWERER_PORT` | `8787` | 监听端口（地址固定 `127.0.0.1`，不可改） |
 | `ANSWERER_K` | `3` | 自洽采样次数，1–10 |
 | `ANSWERER_MARGIN` | `0.15` | 置信度阈值，仅 logprobs 可用时生效 |
 | `ANSWERER_TIMEOUT_MS` | `20000` | 单次模型请求超时 |
 | `ANSWERER_LOG` | `1` | `0` 关闭 JSONL 埋点 |
 | `ANSWERER_LOG_FILE` | `logs/answers.jsonl` | 埋点文件 |
-| `ANSWERER_LOGPROBS` | `0` | `1` 时请求 logprobs（网关不支持会 400） |
+| `ANSWERER_LOGPROBS` | `0` | `1` 时请求 logprobs（只对 openai 协议生效；网关不支持会 400） |
 
-服务只读 `ANSWERER_*` 变量，宿主机上的其它 API key 不会被自动采用；要么显式写进 `.env` 的 `ANSWERER_API_KEY`，要么在启动时导出。`.env` 已在 `.gitignore` 里。
+服务只读 `ANSWERER_*` 变量和预设表里 `keyEnv` 指定的变量；宿主机上的其它 API key 不会被自动采用。`.env` 与 `config/providers.local.json` 都已在 `.gitignore` 里。
 
 ## 埋点
 
@@ -166,7 +265,7 @@ OCS 的匹配器对答案字符串有硬性要求，格式错了就是「搜不�
 ## 测试与评测
 
 ```bash
-node --test                 # 58 个测试：格式化、prompt、provider、service、HTTP、契约
+node --test                 # 86 个测试：格式化、prompt、protocols、router、config、provider、service、HTTP、契约
 node --test eval/format.test.mjs   # 真实用例评测（也在 node --test 里）
 ```
 
@@ -191,18 +290,24 @@ node --test eval/format.test.mjs   # 真实用例评测（也在 node --test 里
 - **OCS 自带按题干精确匹配的缓存**：重复题不会打到模型，所以日志里看到的请求数会少于实际题数。
 - **填空题不知道空位数量**：OCS 的请求不带 blank 数，只能让模型按题干给数组；答案里含 `#`/`===` 时弃权。
 - **`unknown` 题型靠推断**：两个选项且一正一误 → 判断题；有选项 → 单选；无选项 → 填空。推断错会答错，日志里 `effective_type` 可复盘。
-- **margin 通常不可用**：绝大多数 OpenAI 兼容网关不返回 logprobs，`ANSWERER_MARGIN` 实际很少生效，置信度主要靠 K 次自洽投票。
+- **margin 通常不可用**：绝大多数供应商不返回 logprobs（Anthropic / Gemini 明确没有），`ANSWERER_MARGIN` 实际很少生效，置信度主要靠 K 次自洽投票。
 - **LLM 仍可能「自信地答错」**：自洽投票只过滤不稳定输出，过滤不了稳定的错误知识。
-- 没有重试退避、没有并发上限、没有响应缓存、没有多模态、没有流式。
+- **故障转移不覆盖模型输出错误**：HTTP 2xx 但答案格式错只会重试一次，不会换供应商（避免把内容问题误判为供应商故障）。
+- 没有指数退避、没有并发上限、没有响应缓存、没有多模态、没有流式。
 
 ## 目录结构
 
 ```
 baize/
+├── config/
+│   └── providers.json  供应商预设表（数据，不含模型 ID）
 ├── src/
 │   ├── format.mjs      答案格式化 + OCS 词表/前缀规则（核心算法）
 │   ├── prompt.mjs      提示词构建、打乱顺序、序号/填空解析
-│   ├── provider.mjs    AnswerProvider：openai / mock
+│   ├── providers.mjs   预设表校验、providers.local.json 合并、key 解析
+│   ├── protocols/      openai / anthropic / gemini 三种线格式 + 共用 HTTP
+│   ├── router.mjs      故障转移链、可重试错误分类、进程内熔断
+│   ├── provider.mjs    AnswerProvider：openai（单家兼容） / mock
 │   ├── service.mjs     自洽采样、多数票、重试、弃权、埋点
 │   ├── server.mjs      node:http + CORS + 路由
 │   ├── config.mjs      环境变量与 .env
@@ -223,6 +328,12 @@ Error [ERR_NO_TYPESCRIPT]: Node.js is not compiled with TypeScript support
 ```
 
 所以选了 `.mjs` 分支：启动是 `node src/server.mjs`，`node --test` 也不需要任何 flag。代价是没有静态类型，用 JSDoc 注解补足。
+
+## 为什么不引官方 SDK
+
+- 三个 SDK（`openai` / `@anthropic-ai/sdk` / `@google/genai`）会拖进大量传递依赖，`npm install` 一装就违背「零依赖、复制即跑」，也没法 `bun build --compile` 成单文件。
+- 本服务只需要「一次非流式 JSON 请求 + 取一段文本」，三家的线格式已经收敛在 `src/protocols/*.mjs` 的 `buildRequest` / `parseResponse` 两个纯函数里；新增协议只要实现同名接口，路由与业务层不用动。
+- 官方 SDK 的流式、工具调用、自动重试等能力一个都用不上；故障转移需要看得见的错误分类（状态码 / 是否可重试），手写 fetch 反而更可控。
 
 ## 评测数据来源与许可
 

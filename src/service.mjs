@@ -70,6 +70,8 @@ export function createService(config) {
 				return await sampleOnce(type, title, options);
 			} catch (error) {
 				if (!(error instanceof InvalidOutputError) && !(error instanceof ProviderError)) throw error;
+				// 路由层标记的致命错误（400/401/403/404）不重试，避免重复烧额度。
+				if (error instanceof ProviderError && /** @type {any} */ (error).retryable === false) throw error;
 				if (attempt === 0) firstError = error;
 				lastError = error;
 			}
@@ -173,6 +175,10 @@ export function createService(config) {
 			if (!winner || entry.count > winner.count) winner = entry;
 		}
 		if (!winner) return finish({ ok: false, reason: REASONS.invalidOutput });
+
+		// 多 provider 路由：埋点里的 provider 必须是本次实际应答的那家（不是整条链）。
+		if (winner.sample.result.provider) record.provider = winner.sample.result.provider;
+		if (winner.sample.result.model) record.model = winner.sample.result.model;
 
 		// 票数写入埋点：选择题记序号组合，填空题只记第几个样本（避免把答案正文写进日志）
 		if (isCompletion) {

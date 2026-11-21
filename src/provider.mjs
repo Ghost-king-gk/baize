@@ -73,6 +73,26 @@ export function marginFromLogprobs(choice) {
 	return undefined;
 }
 
+/**
+ * 把模型纯文本输出解释成本服务需要的结构（打乱序号 → 原始下标）。
+ * OpenAIProvider 与多 provider 路由共用，保证两条路径的解析规则一致。
+ * @param {string} content
+ * @param {{order: number[]}} prompt
+ * @param {{type: 'single'|'multiple'|'judgement'|'completion'|'unknown', optionCount: number}} opts
+ * @returns {{letters: number[], answers?: string[]}}
+ */
+export function interpretAnswer(content, prompt, opts) {
+	if (opts.type === 'completion') {
+		return { letters: [], answers: parseCompletion(content) };
+	}
+
+	const displayLetters = parseLetters(content, prompt.order.length || opts.optionCount);
+	const letters = displayLetters.map((letter) => prompt.order[letter - 1] + 1);
+	const error = validateLetters(letters, opts.optionCount, opts.type);
+	if (error) throw new InvalidOutputError(`letters_${error}`);
+	return { letters };
+}
+
 /** OpenAI 兼容 chat/completions provider。 */
 export class OpenAIProvider {
 	/**
@@ -99,7 +119,7 @@ export class OpenAIProvider {
 
 	/**
 	 * @param {{system: string, user: string, order: number[], optionCount: number}} prompt
-	 * @param {{type: string, optionCount: number}} opts
+	 * @param {{type: 'single'|'multiple'|'judgement'|'completion'|'unknown', optionCount: number}} opts
 	 */
 	async ask(prompt, opts) {
 		const isCompletion = opts.type === 'completion';
@@ -157,14 +177,11 @@ export class OpenAIProvider {
 		const content = extractContent(choice.message?.content);
 
 		if (isCompletion) {
-			const answers = parseCompletion(content);
+			const { answers } = interpretAnswer(content, prompt, opts);
 			return { letters: [], answers, margin: undefined, raw: content };
 		}
 
-		const displayLetters = parseLetters(content, prompt.order.length || opts.optionCount);
-		const letters = displayLetters.map((letter) => prompt.order[letter - 1] + 1);
-		const error = validateLetters(letters, opts.optionCount, opts.type);
-		if (error) throw new InvalidOutputError(`letters_${error}`);
+		const { letters } = interpretAnswer(content, prompt, opts);
 
 		return {
 			letters,
