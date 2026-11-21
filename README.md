@@ -19,12 +19,6 @@
 
 </div>
 
-<br>
-
-<div align="center">
-<img src="assets/stats.svg" alt="0 运行时依赖 · 4 线协议 · 1 进程" width="860">
-</div>
-
 ---
 
 ## 它是什么
