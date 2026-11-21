@@ -1,12 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { ProviderError, MockProvider } from '../src/provider.mjs';
 import { buildPrompt } from '../src/prompt.mjs';
 import { createRouter } from '../src/router.mjs';
 import { createService } from '../src/service.mjs';
+import { mergeProviderTables, resolveProvider } from '../src/providers.mjs';
 
 const OPTIONS = ['A. 1', 'B. 2', 'C. 3', 'D. 4'];
+const CATALOG_URL = 'https://opencode.ai/inference/go/v1/models';
+const CATALOG = JSON.parse(
+	readFileSync(fileURLToPath(new URL('./fixtures/opencode-go-models.json', import.meta.url)), 'utf8')
+);
 
 function singlePrompt(order = [0, 1, 2, 3]) {
 	return buildPrompt({ type: 'single', title: '1+2 = ?', options: OPTIONS, order });
@@ -275,4 +282,138 @@ test('路由：内容层错误（截断/空输出）不触发故障转移，交�
 		(error) => error.name === 'InvalidOutputError'
 	);
 	assert.equal(calls.length, 1, '已经拿到应答就不切下一家');
+});
+
+/** @param {any} payload */
+function jsonResponse(payload) {
+	return new Response(JSON.stringify(payload), {
+		status: 200,
+		headers: { 'content-type': 'application/json' }
+	});
+}
+
+/**
+ * 用真实的预设条目 + resolveProvider 构造目录型 provider，避免测试里手写假的目录字段。
+ * @param {{model?: string}} [options]
+ */
+function catalogProvider(options = {}) {
+	const table = mergeProviderTables({
+		'opencode-go': {
+			label: 'OpenCode Go（订阅）',
+			catalog: { url: CATALOG_URL },
+			keyEnv: 'OPENCODE_GO_API_KEY'
+		}
+	});
+	return resolveProvider('opencode-go', table, {
+		OPENCODE_GO_API_KEY: 'stub-token',
+		ANSWERER_MODEL: options.model ?? 'claude-haiku-5-5'
+	});
+}
+
+test('路由：目录 provider 在 ask 时解析协议与 baseUrl，最终 URL 用目录地址', async () => {
+	const calls = [];
+	const logs = [];
+	const messagesUrl = 'https://opencode.ai/inference/go/anthropic/v1/messages';
+
+	const fetchImpl = async (url, init) => {
+		calls.push({ url, init });
+		if (url === CATALOG_URL) return jsonResponse(CATALOG);
+		if (url === messagesUrl) return jsonResponse({ content: [{ type: 'text', text: '1' }], stop_reason: 'end_turn' });
+		throw new Error(`unexpected url: ${url}`);
+	};
+
+	const router = createRouter({
+		providers: [catalogProvider()],
+		chain: ['opencode-go'],
+		fetchImpl,
+		log: (event) => logs.push(event)
+	});
+
+	const result = await router.ask(singlePrompt(), { type: 'single', optionCount: 4 });
+	assert.deepEqual(result.letters, [1]);
+	assert.equal(result.provider, 'opencode-go');
+	assert.equal(result.model, 'claude-haiku-5-5');
+
+	assert.equal(calls.length, 2, '先拉目录、再发 completion');
+	assert.equal(calls[0].url, CATALOG_URL);
+	assert.equal(calls[1].url, messagesUrl, '最终 URL 必须用目录给的 baseUrl + /messages');
+
+	/** @type {Record<string, string>} */
+	const headers = calls[1].init.headers;
+	assert.equal(headers.Authorization, 'Bearer stub-token');
+	assert.equal('x-api-key' in headers, false, '目录形态默认 bearer，不能混用 x-api-key');
+	assert.equal('anthropic-beta' in headers, false);
+	assert.deepEqual(Object.keys(headers).sort(), ['Authorization', 'Content-Type', 'anthropic-version']);
+
+	const event = logs.find((item) => item.event === 'catalog_resolved');
+	assert.deepEqual(
+		{ provider: event.provider, protocol: event.protocol },
+		{ provider: 'opencode-go', protocol: 'anthropic' }
+	);
+	assert.equal(JSON.stringify(logs).includes('stub-token'), false, '日志里不能出现 token');
+
+	// 第二次 ask 复用同一个 catalog 实例：目录只拉一次。
+	await router.ask(singlePrompt(), { type: 'single', optionCount: 4 });
+	assert.equal(calls.filter((call) => call.url === CATALOG_URL).length, 1, 'catalog 实例按 url 复用');
+});
+
+test('路由：目录拉取失败 → 可切换错误，继续下一家', async () => {
+	const calls = [];
+	const logs = [];
+	const fetchImpl = async (url) => {
+		calls.push(url);
+		if (url === CATALOG_URL) return new Response('catalog down', { status: 503 });
+		if (new URL(url).hostname === 'second.test') return chatResponse('1');
+		throw new Error(`unexpected url: ${url}`);
+	};
+
+	const router = createRouter({
+		providers: [catalogProvider(), provider('second')],
+		chain: ['opencode-go', 'second'],
+		fetchImpl,
+		log: (event) => logs.push(event)
+	});
+
+	const result = await router.ask(singlePrompt(), { type: 'single', optionCount: 4 });
+	assert.equal(result.provider, 'second');
+	assert.equal(calls.length, 2);
+
+	const fallback = logs.find((event) => event.event === 'provider_fallback' && event.provider === 'opencode-go');
+	assert.ok(fallback, '目录拉取失败应记 fallback');
+	assert.deepEqual({ status: fallback.status, next: fallback.next }, { status: 503, next: 'second' });
+});
+
+test('路由：目录里模型结构不对 → 不可切换，立即抛错；下一家不烧额度', async () => {
+	const calls = [];
+	const logs = [];
+	const broken = {
+		object: 'list',
+		data: [{ id: 'claude-haiku-5-5', type: 'chat', api: { interactions: { base_url: 'https://gw.test/google/v1beta' } } }]
+	};
+
+	const fetchImpl = async (url) => {
+		calls.push(url);
+		if (url === CATALOG_URL) return jsonResponse(broken);
+		if (new URL(url).hostname === 'second.test') return chatResponse('1');
+		throw new Error(`unexpected url: ${url}`);
+	};
+
+	const router = createRouter({
+		providers: [catalogProvider(), provider('second')],
+		chain: ['opencode-go', 'second'],
+		fetchImpl,
+		log: (event) => logs.push(event)
+	});
+
+	await assert.rejects(
+		() => router.ask(singlePrompt(), { type: 'single', optionCount: 4 }),
+		(error) => {
+			assert.ok(error instanceof ProviderError);
+			assert.equal(error.retryable, false);
+			assert.match(error.message, /interactions/, '报错要带实际键名');
+			return true;
+		}
+	);
+	assert.equal(calls.filter((url) => url.includes('second.test')).length, 0, '配置问题不能切下一家');
+	assert.ok(logs.some((event) => event.event === 'provider_fatal' && event.provider === 'opencode-go'));
 });

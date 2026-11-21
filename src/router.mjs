@@ -10,6 +10,7 @@
  */
 
 import { InvalidOutputError } from './format.mjs';
+import { CatalogError, createCatalog } from './catalog.mjs';
 import { ProviderError, interpretAnswer } from './provider.mjs';
 import { ProtocolError, fetchJson } from './protocols/http.mjs';
 import * as anthropic from './protocols/anthropic.mjs';
@@ -106,7 +107,9 @@ export class CircuitBreaker {
  *   provider: string,
  *   status?: number | null,
  *   next?: string | null,
- *   until?: number
+ *   until?: number,
+ *   protocol?: string,
+ *   model?: string
  * }} event
  */
 export function defaultRouterLog(event) {
@@ -124,6 +127,11 @@ export function defaultRouterLog(event) {
 	}
 	if (event.event === 'provider_fatal') {
 		console.error(`[baize] provider=${event.provider} status=${event.status ?? 'network'} fatal`);
+		return;
+	}
+	if (event.event === 'catalog_resolved') {
+		// 只打 provider id 与解析出的协议；不打 baseUrl、token 或 header。
+		console.error(`[baize] provider=${event.provider} protocol=${event.protocol} catalog=ok`);
 		return;
 	}
 	if (event.event === 'circuit_open') {
@@ -146,7 +154,9 @@ export function defaultRouterLog(event) {
  *   log?: (event: any) => void,
  *   now?: () => number,
  *   failureThreshold?: number,
- *   cooldownMs?: number
+ *   cooldownMs?: number,
+ *   catalogTtlMs?: number,
+ *   catalogTimeoutMs?: number
  * }} config
  */
 export function createRouter(config) {
@@ -160,7 +170,9 @@ export function createRouter(config) {
 		log = defaultRouterLog,
 		now = Date.now,
 		failureThreshold = DEFAULT_FAILURE_THRESHOLD,
-		cooldownMs = DEFAULT_COOLDOWN_MS
+		cooldownMs = DEFAULT_COOLDOWN_MS,
+		catalogTtlMs = 10 * 60 * 1000,
+		catalogTimeoutMs = 5000
 	} = config;
 
 	if (!Array.isArray(chain) || chain.length === 0) throw new Error('createRouter 需要非空 chain');
@@ -176,6 +188,45 @@ export function createRouter(config) {
 	const breaker = new CircuitBreaker({ failureThreshold, cooldownMs, now });
 
 	/**
+	 * 目录实例按 `catalog.url` 在进程内复用：同一进程不要每次请求都重建、重拉。
+	 * @type {Map<string, ReturnType<typeof createCatalog>>}
+	 */
+	const catalogs = new Map();
+
+	/** @param {any} provider */
+	function catalogFor(provider) {
+		const url = String(provider.catalog?.url ?? '');
+		if (!url) throw new ProviderError(`provider "${provider.id}" 的 catalog.url 为空`);
+		let catalog = catalogs.get(url);
+		if (!catalog) {
+			catalog = createCatalog({
+				url,
+				apiKey: provider.apiKey,
+				fetchImpl,
+				timeoutMs: catalogTimeoutMs,
+				ttlMs: catalogTtlMs,
+				now
+			});
+			catalogs.set(url, catalog);
+		}
+		return catalog;
+	}
+
+	/**
+	 * 目录错误 → 协议层错误。拉取失败可切换；模型不存在 / api 结构问题不可切换。
+	 * @param {any} provider
+	 * @param {unknown} error
+	 */
+	function catalogFailure(provider, error) {
+		if (!(error instanceof CatalogError)) return error;
+		return new ProtocolError(`provider "${provider.id}" 模型目录解析失败: ${error.message}`, {
+			status: error.status ?? null,
+			retryable: error.retryable === true,
+			cause: error
+		});
+	}
+
+	/**
 	 * 尝试单个 provider。HTTP 层错误向上抛 ProtocolError；内容层错误抛 InvalidOutputError。
 	 * @param {any} provider
 	 * @param {any} prompt
@@ -188,20 +239,36 @@ export function createRouter(config) {
 			return { ...result, provider: provider.id, model: provider.model ?? 'mock' };
 		}
 
-		const adapterName = PROTOCOL_ADAPTERS[/** @type {keyof typeof PROTOCOL_ADAPTERS} */ (provider.protocol)];
+		if (!provider.model) throw new ProviderError(`provider "${provider.id}" 缺少 model`);
+
+		// 目录形态：协议与地址由模型决定，必须在构建请求之前解析。
+		/** @type {any} */
+		let effective = provider;
+		if (provider.catalog && !provider.baseUrl) {
+			/** @type {Awaited<ReturnType<ReturnType<typeof createCatalog>['resolve']>>} */
+			let resolved;
+			try {
+				resolved = await catalogFor(provider).resolve(provider.model);
+			} catch (error) {
+				throw catalogFailure(provider, error);
+			}
+			effective = { ...provider, protocol: resolved.protocol, baseUrl: resolved.baseUrl };
+			log({ event: 'catalog_resolved', provider: provider.id, protocol: resolved.protocol, model: provider.model });
+		}
+
+		const adapterName = PROTOCOL_ADAPTERS[/** @type {keyof typeof PROTOCOL_ADAPTERS} */ (effective.protocol)];
 		const adapter = adapterName ? ADAPTERS[adapterName] : undefined;
 		if (!adapter) {
 			throw new ProviderError(
-				`未知协议: ${provider.protocol}（支持: ${Object.keys(PROTOCOL_ADAPTERS).join(', ')}）`
+				`未知协议: ${effective.protocol}（支持: ${Object.keys(PROTOCOL_ADAPTERS).join(', ')}）`
 			);
 		}
 
-		if (!provider.baseUrl) throw new ProviderError(`provider "${provider.id}" 缺少 baseUrl`);
-		if (!provider.model) throw new ProviderError(`provider "${provider.id}" 缺少 model`);
+		if (!effective.baseUrl) throw new ProviderError(`provider "${provider.id}" 缺少 baseUrl`);
 
 		const isCompletion = opts.type === 'completion';
 		const request = adapter.buildRequest({
-			provider,
+			provider: effective,
 			model: provider.model,
 			// 协议适配器只接受单段 prompt：把 system 与 user 用空行拼接。
 			prompt: prompt.system ? `${prompt.system}\n\n${prompt.user}` : prompt.user,

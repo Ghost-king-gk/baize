@@ -56,6 +56,8 @@ curl -s -X POST 127.0.0.1:8787/answer \
 | `openrouter` | openai | `api-key` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | 是 |
 | `ollama` | openai | `api-key` | `http://127.0.0.1:11434/v1` | 无（null） | 是 |
 | `lmstudio` | openai | `api-key` | `http://127.0.0.1:1234/v1` | 无（null） | 是 |
+| `opencode` | 目录 | `bearer` | 运行时从 `catalog.url` 解析 | `OPENCODE_GO_API_KEY` | 是 |
+| `opencode-go` | 目录 | `bearer` | 运行时从 `catalog.url` 解析 | `OPENCODE_GO_API_KEY` | 是 |
 
 `protocol` 与 `auth` 是正交的两件事：
 
@@ -66,47 +68,44 @@ curl -s -X POST 127.0.0.1:8787/answer \
 | `oauth` | Bearer + `anthropic-beta: claude-code-20250219,oauth-2025-04-20`，可选指纹伪装 | Claude 订阅，只能写 `providers.local.json` |
 | `codex-oauth` | Bearer + `originator: codex_cli_rs` + `chatgpt-account-id` | Codex 订阅，只能写 `providers.local.json` |
 
-### OpenCode Inference（按官方文档手配，不内置预设）
+### OpenCode Inference（目录驱动，零 baseUrl 配置）
 
-`https://opencode.ai/inference` 下每个模型只由**一种** API 族提供，四族路径互不相同，认证一律 `Authorization: Bearer <token>`：
-
-| API 族 | 完整路径 |
-| --- | --- |
-| OpenAI Chat Completions | `/inference/openai/v1/chat/completions` |
-| OpenAI Responses | `/inference/openai/v1/responses` |
-| Anthropic Messages | `/inference/anthropic/v1/messages` |
-| Gemini | `/inference/google/v1beta/models/<model>:generateContent` |
-
-baize 不替 OpenCode 做预设，因为用哪个族取决于你选的模型。模型的族见官方 model endpoints 表，或直接查：
+OpenCode 的模型列表接口自带每个模型该用哪种 API。`GET` 一下就能看到（认证是 `Authorization: Bearer <key>`）：
 
 ```bash
-curl -H "Authorization: Bearer $OPENCODE_GO_API_KEY" https://opencode.ai/inference/v1/models
+curl -H "Authorization: Bearer $OPENCODE_GO_API_KEY" https://opencode.ai/inference/go/v1/models
 ```
 
-确定族之后，在 `config/providers.local.json` 里写一条。`baseUrl` 填到「适配器自己会接后缀」的那一层：
-
-| `protocol` | `baseUrl` | 适配器追加 | 最终请求 |
-| --- | --- | --- | --- |
-| `openai` | `https://opencode.ai/inference/openai/v1` | `/chat/completions` | 同左 |
-| `responses` | `https://opencode.ai/inference/openai/v1` | `/responses` | 同左 |
-| `anthropic` | `https://opencode.ai/inference/anthropic/v1` | `/messages` | 同左 |
-| `gemini` | `https://opencode.ai/inference/google/v1beta` | `/models/<model>:generateContent` | 同左 |
-
-```json
-{
-	"my-model": {
-		"protocol": "anthropic",
-		"auth": "bearer",
-		"baseUrl": "https://opencode.ai/inference/anthropic/v1",
-		"keyEnv": "OPENCODE_GO_API_KEY",
-		"model": "claude-sonnet-5-5"
-	}
-}
-```
+`data[]` 里每个模型有 `id` / `type` / `api`，`api` 里带该模型的 `base_url`。baize 在**运行时**拉这份目录，用模型 id 反查协议和地址，所以用户只需要填模型 id：
 
 ```bash
-OPENCODE_GO_API_KEY=... ANSWERER_CHAIN=my-model node src/server.mjs
+OPENCODE_GO_API_KEY=... ANSWERER_CHAIN=opencode-go ANSWERER_MODEL=claude-haiku-5-5 node src/server.mjs
 ```
+
+不需要填 `baseUrl` / `protocol`。支持两个目录，密钥都是 `OPENCODE_GO_API_KEY`：
+
+| provider id | 目录地址 | 计费方式 |
+| --- | --- | --- |
+| `opencode` | `https://opencode.ai/inference/v1/models` | OpenCode Models，按额度 |
+| `opencode-go` | `https://opencode.ai/inference/go/v1/models` | OpenCode Go 订阅 |
+
+目录 `api` 键 → 本项目协议：
+
+| `api` 键 | protocol | 最终请求 |
+| --- | --- | --- |
+| `chat-completions` | `openai` | `{base_url}/chat/completions` |
+| `responses` | `responses` | `{base_url}/responses` |
+| `messages` | `anthropic` | `{base_url}/messages` |
+| `generate-content` | `gemini` | `{base_url}/models/<model>:generateContent` |
+
+解析规则：
+
+- 只认这四个键，`interactions` 等其它键一律忽略。过滤后**恰好剩一个**才用。
+- 剩 0 个（例如某模型只有 `interactions`）→ 报错并列出实际键名，不会瞎猜。
+- 剩 2 个及以上 → 报「歧义」，请在 `config/providers.local.json` 里另建一个条目、显式写 `protocol` + `baseUrl`。
+- 只有 `type: "chat"` 的模型能用于问答，其它 type 直接报错。
+- 目录在进程内缓存 **10 分钟**（按目录 URL 复用同一个实例），过期或重启后重新拉取；不落盘。
+- 目录拉取失败（网络、超时、5xx、非 JSON）算**可切换错误**：该 provider 被跳过，继续故障转移链；模型不存在或 `api` 结构不对算配置错误，立即失败。任何情况下都不会静默用错地址。
 
 **免费模型只在 OpenCode 客户端内可用**：其他客户端即使带 key 也会收到 403。baize 属于外部客户端，必须用付费模型或 Go 订阅。每次响应的 `usage` 里带 `cost` 与 `opencode.billing_source`，可以直接核对是不是走的订阅额度（`go` / `go-plus`）。
 

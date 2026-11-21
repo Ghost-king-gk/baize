@@ -37,7 +37,7 @@ const AUTH_PROTOCOL_RESTRICTIONS = { oauth: 'anthropic', 'codex-oauth': 'respons
 /** @typedef {{
  *   id: string,
  *   label: string,
- *   protocol: string,
+ *   protocol: string | null,
  *   baseUrl: string,
  *   keyEnv: string | null,
  *   model?: string,
@@ -45,7 +45,8 @@ const AUTH_PROTOCOL_RESTRICTIONS = { oauth: 'anthropic', 'codex-oauth': 'respons
  *   auth?: string,
  *   accountId?: string | null,
  *   impersonate?: boolean | string,
- *   userAgent?: string
+ *   userAgent?: string,
+ *   catalog?: { url: string }
  * }} ProviderEntry */
 
 /**
@@ -97,7 +98,22 @@ export function normalizeProvider(id, entry, options = {}) {
 	if (!id || typeof id !== 'string') throw new Error('provider id 必须是非空字符串');
 	if (!isPlainObject(entry)) throw new Error(`provider "${id}" 必须是 JSON 对象`);
 
-	if (!allowed.includes(entry.protocol)) {
+	// 两种形态二选一：传统形态写 protocol + baseUrl；目录形态只写 catalog.url。
+	// 同时写会让人分不清运行时到底信谁，直接拒绝。
+	const isCatalog = entry.catalog !== undefined;
+	if (isCatalog) {
+		if (
+			Object.prototype.hasOwnProperty.call(entry, 'protocol') ||
+			Object.prototype.hasOwnProperty.call(entry, 'baseUrl')
+		) {
+			throw new Error(
+				`provider "${id}" 不能同时写 catalog 与 protocol/baseUrl：目录形态的协议和地址在运行时由模型目录解析`
+			);
+		}
+		if (!isPlainObject(entry.catalog) || typeof entry.catalog.url !== 'string' || !entry.catalog.url.trim()) {
+			throw new Error(`provider "${id}" 的 catalog.url 必须是非空字符串`);
+		}
+	} else if (!allowed.includes(entry.protocol)) {
 		throw new Error(`provider "${id}" 的 protocol 必须是 ${allowed.join('|')}，收到: ${String(entry.protocol)}`);
 	}
 
@@ -121,7 +137,12 @@ export function normalizeProvider(id, entry, options = {}) {
 	if (auth !== undefined && !AUTH_MODES.includes(auth)) {
 		throw new Error(`provider "${id}" 的 auth 必须是 ${AUTH_MODES.join('|')}，收到: ${String(auth)}`);
 	}
-	auth = auth ?? 'api-key';
+	// 目录形态默认 Bearer：OpenCode Inference 两种目录都只认 Authorization: Bearer。
+	auth = auth ?? (isCatalog ? 'bearer' : 'api-key');
+
+	if (isCatalog && (auth === 'oauth' || auth === 'codex-oauth')) {
+		throw new Error(`provider "${id}" 是目录形态，协议要等运行时解析，不能使用 auth="${auth}"`);
+	}
 
 	const restrictedProtocol = AUTH_PROTOCOL_RESTRICTIONS[/** @type {keyof typeof AUTH_PROTOCOL_RESTRICTIONS} */ (auth)];
 	if (restrictedProtocol && protocol !== restrictedProtocol) {
@@ -145,7 +166,7 @@ export function normalizeProvider(id, entry, options = {}) {
 		throw new Error(`provider 预设 "${id}" 不应写 model：模型只能来自 ANSWERER_MODEL（单 provider）或 providers.local.json 里逐家的 model`);
 	}
 
-	if (typeof entry.baseUrl !== 'string') {
+	if (!isCatalog && typeof entry.baseUrl !== 'string') {
 		throw new Error(`provider "${id}" 的 baseUrl 必须是字符串（可以为空，表示必须由用户填写）`);
 	}
 
@@ -162,9 +183,10 @@ export function normalizeProvider(id, entry, options = {}) {
 		...entry,
 		id,
 		label: typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : id,
-		protocol,
+		protocol: isCatalog ? null : protocol,
 		auth,
-		baseUrl: entry.baseUrl.trim().replace(/\/+$/, ''),
+		baseUrl: isCatalog ? '' : entry.baseUrl.trim().replace(/\/+$/, ''),
+		...(isCatalog ? { catalog: { url: entry.catalog.url.trim().replace(/\/+$/, '') } } : {}),
 		keyEnv
 	};
 }
@@ -254,13 +276,19 @@ export function resolveProvider(id, table, env, overrides = {}) {
 		throw new Error(`未知 provider "${id}"。可用: mock, ${known}（自定义请写 config/providers.local.json）`);
 	}
 
-	const auth = entry.auth ?? OAUTH_AUTH_MODES[/** @type {keyof typeof OAUTH_AUTH_MODES} */ (entry.protocol)] ?? 'api-key';
+	const isCatalog = Boolean(entry.catalog);
+	const auth =
+		entry.auth ??
+		(isCatalog ? 'bearer' : OAUTH_AUTH_MODES[/** @type {keyof typeof OAUTH_AUTH_MODES} */ (entry.protocol)] ?? 'api-key');
 	const protocol = LEGACY_PROTOCOLS[/** @type {keyof typeof LEGACY_PROTOCOLS} */ (entry.protocol)] ?? entry.protocol;
 	const isSubscription = auth === 'oauth' || auth === 'codex-oauth';
-	const baseUrl = String(overrides.baseUrl || entry.baseUrl || '')
-		.trim()
-		.replace(/\/+$/, '');
-	if (!baseUrl) {
+	// 目录形态没有静态 baseUrl：协议与地址都在 ask 时由 catalog.resolve() 决定。
+	const baseUrl = isCatalog
+		? ''
+		: String(overrides.baseUrl || entry.baseUrl || '')
+				.trim()
+				.replace(/\/+$/, '');
+	if (!isCatalog && !baseUrl) {
 		throw new Error(`provider "${id}" 的 baseUrl 为空：请设置 ANSWERER_BASE_URL 或在 providers.local.json 里填写`);
 	}
 
@@ -288,23 +316,24 @@ export function resolveProvider(id, table, env, overrides = {}) {
 		apiKey = String(env[entry.keyEnv] ?? '').trim();
 	}
 
+	if (!apiKey && entry.keyEnv && auth !== 'none') {
+		throw new Error(`provider "${id}" 缺少环境变量 ${entry.keyEnv}`);
+	}
 	if (!apiKey && auth === 'bearer') {
 		throw new Error(
 			`provider "${id}" 的 auth=bearer 需要 API key：请设置 ${entry.keyEnv ?? 'ANSWERER_API_KEY'}（或 ANSWERER_API_KEY）`
 		);
 	}
-	if (!apiKey && entry.keyEnv && auth !== 'none') {
-		throw new Error(`provider "${id}" 缺少环境变量 ${entry.keyEnv}`);
-	}
 
 	return {
 		...entry,
-		protocol,
+		protocol: isCatalog ? null : protocol,
 		model,
 		baseUrl,
 		apiKey,
 		// 显式 auth 原样保留；api-key 没拿到 key 时降级为 none，协议适配器据此跳过认证头。
 		auth: isSubscription || auth === 'none' ? auth : apiKey ? auth : 'none',
-		...(accountId ? { accountId } : {})
+		...(accountId ? { accountId } : {}),
+		...(isCatalog ? { catalog: entry.catalog } : {})
 	};
 }

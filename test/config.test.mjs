@@ -44,15 +44,26 @@ test('config/providers.json：protocol 合法、不写 model、keyEnv 为 null �
 		'minimax',
 		'ollama',
 		'openai',
+		'opencode',
+		'opencode-go',
 		'openrouter'
 	]);
 
 	for (const [id, entry] of Object.entries(PRESETS)) {
-		assert.ok(PROTOCOLS.includes(entry.protocol), `${id}.protocol=${entry.protocol}`);
-		assert.equal(Object.prototype.hasOwnProperty.call(entry, 'model'), false, `${id} 不能写死 model`);
-		assert.equal(typeof entry.baseUrl, 'string', `${id}.baseUrl`);
-		assert.ok(entry.keyEnv === null || typeof entry.keyEnv === 'string', `${id}.keyEnv`);
 		assert.ok(typeof entry.label === 'string' && entry.label.length > 0, `${id}.label`);
+		assert.equal(Object.prototype.hasOwnProperty.call(entry, 'model'), false, `${id} 不能写死 model`);
+		assert.ok(entry.keyEnv === null || typeof entry.keyEnv === 'string', `${id}.keyEnv`);
+
+		if (entry.catalog) {
+			// 目录形态：协议和地址在运行时解析，自身不得携带静态值。
+			assert.equal(Object.prototype.hasOwnProperty.call(entry, 'protocol'), false, `${id} 是目录形态`);
+			assert.equal(Object.prototype.hasOwnProperty.call(entry, 'baseUrl'), false, `${id} 是目录形态`);
+			assert.ok(typeof entry.catalog.url === 'string' && entry.catalog.url.startsWith('https://'), `${id}.catalog.url`);
+			continue;
+		}
+
+		assert.ok(PROTOCOLS.includes(entry.protocol), `${id}.protocol=${entry.protocol}`);
+		assert.equal(typeof entry.baseUrl, 'string', `${id}.baseUrl`);
 	}
 
 	const normalized = normalizeProvider('openai', PRESETS.openai, { source: 'preset' });
@@ -128,6 +139,53 @@ test('loadProviderTable：预设 + providers.local.json 合并读取', () => {
 			assert.equal(table.local.extra.label, 'Extra');
 		}
 	);
+});
+
+test('目录型 provider：启动不要求 baseUrl，protocol/baseUrl 待运行时解析', () => {
+	const config = loadConfig({
+		ANSWERER_CHAIN: 'opencode-go',
+		ANSWERER_MODEL: 'claude-haiku-5-5',
+		OPENCODE_GO_API_KEY: 'stub-token'
+	});
+	const entry = config.providers[0];
+
+	assert.equal(entry.id, 'opencode-go');
+	assert.equal(entry.protocol, null, '目录形态的协议由模型决定，启动时为空');
+	assert.equal(entry.baseUrl, '', '目录形态不要求手写 baseUrl');
+	assert.equal(entry.auth, 'bearer');
+	assert.equal(entry.model, 'claude-haiku-5-5');
+	assert.equal(entry.apiKey, 'stub-token');
+	assert.deepEqual(entry.catalog, { url: 'https://opencode.ai/inference/go/v1/models' });
+
+	// key 仍然必须能读到，否则 fail fast。
+	assert.throws(
+		() => loadConfig({ ANSWERER_CHAIN: 'opencode-go', ANSWERER_MODEL: 'claude-haiku-5-5' }),
+		/缺少环境变量 OPENCODE_GO_API_KEY/
+	);
+
+	// 两种形态二选一：同时写 catalog 与 protocol/baseUrl 视为歧义。
+	assert.throws(
+		() =>
+			normalizeProvider(
+				'mixed',
+				{ protocol: 'openai', catalog: { url: 'https://x.test/models' }, keyEnv: null },
+				{ source: 'preset' }
+			),
+		/不能同时写 catalog 与 protocol\/baseUrl/
+	);
+	assert.throws(
+		() => normalizeProvider('no-url', { catalog: {}, keyEnv: null }, { source: 'preset' }),
+		/catalog\.url/
+	);
+
+	const normalized = normalizeProvider(
+		'opencode-go',
+		{ label: 'Go', catalog: { url: 'https://opencode.ai/inference/go/v1/models/' }, keyEnv: 'K' },
+		{ source: 'preset' }
+	);
+	assert.equal(normalized.protocol, null);
+	assert.equal(normalized.auth, 'bearer', '目录形态默认 Bearer');
+	assert.deepEqual(normalized.catalog, { url: 'https://opencode.ai/inference/go/v1/models' }, '去掉尾部斜杠');
 });
 
 test('ANSWERER_CHAIN：逗号分隔、去空白、按顺序去重；优先于 ANSWERER_PROVIDER', () => {

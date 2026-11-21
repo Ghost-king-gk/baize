@@ -58,5 +58,15 @@
 		"protocol": "openai",
 		"baseUrl": "http://127.0.0.1:1234/v1",
 		"keyEnv": null
+	},
+	"opencode": {
+		"label": "OpenCode Models",
+		"catalog": { "url": "https://opencode.ai/inference/v1/models" },
+		"keyEnv": "OPENCODE_GO_API_KEY"
+	},
+	"opencode-go": {
+		"label": "OpenCode Go（订阅）",
+		"catalog": { "url": "https://opencode.ai/inference/go/v1/models" },
+		"keyEnv": "OPENCODE_GO_API_KEY"
 	}
 }
