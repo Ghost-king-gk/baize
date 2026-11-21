@@ -9,7 +9,7 @@ import {
 	quotaUsage,
 	summarize
 } from '../tools/aggregate.mjs';
-import { generateDashboard } from '../tools/dashboard.mjs';
+import { generateDashboard } from '../src/web/dashboard.mjs';
 
 /** 造一批覆盖 5 天、3 个模型、含 null 与旧行的记录。 */
 function fixture() {

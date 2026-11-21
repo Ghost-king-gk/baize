@@ -1,0 +1,10 @@
+.git
+.env
+logs
+dashboard.html
+node_modules
+docs
+eval
+test
+*.md
+!README.md

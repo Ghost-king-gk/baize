@@ -7,11 +7,15 @@
  * 因此必须返回 Access-Control-Allow-*，否则真实网课页面里一个请求都发不出去。
  */
 
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { HOST, loadConfig, loadDotenv } from './config.mjs';
+import { HOST, ROOT, loadConfig, loadDotenv } from './config.mjs';
+import { renderHome, renderSettings } from './web/admin.mjs';
+import { loadRecords } from './web/aggregate.mjs';
+import { generateDashboard } from './web/dashboard.mjs';
 import { createJsonlLogger } from './log.mjs';
 import { MockProvider } from './provider.mjs';
 import { createRouter } from './router.mjs';
@@ -89,8 +93,98 @@ function readBody(req, limit) {
  *   maxBodyBytes?: number
  * }} options
  */
+
+/**
+ * 读取日志尾部；文件不存在或损坏时返回空数组（管理页不该因为日志缺失而 500）。
+ * @param {string} file
+ * @param {number} [limit]
+ */
+function readLogRecords(file, limit = 5000) {
+	if (!file) return [];
+	try {
+		const lines = readFileSync(file, 'utf8').trimEnd().split('\n');
+		return loadRecords(lines.slice(-limit).join('\n'));
+	} catch {
+		return [];
+	}
+}
+
+/** @param {string} file */
+function readJsonFile(file) {
+	if (!file) return null;
+	try {
+		return JSON.parse(readFileSync(file, 'utf8'));
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 生成 OCS 侧配置文本，端口/地址按当前监听重写。
+ * @param {string} file
+ * @param {number} port
+ */
+function readContract(file, port) {
+	const table = readJsonFile(file);
+	const first = Array.isArray(table) ? table[0] : null;
+	if (!first) return '[]';
+	return JSON.stringify(
+		[{ ...first, url: `http://127.0.0.1:${port}/answer`, homepage: `http://127.0.0.1:${port}` }],
+		null,
+		2
+	);
+}
+
+/**
+ * 管理页展示的环境变量：ANSWERER_* 与 provider 表里用到的 keyEnv。
+ * @param {Record<string, string | undefined>} env
+ * @param {string} providersFile
+ */
+function envRows(env, providersFile) {
+	const table = /** @type {Record<string, any> | null} */ (readJsonFile(providersFile));
+	const keys = new Set(Object.keys(env).filter((key) => key.startsWith('ANSWERER_')));
+	for (const entry of Object.values(table ?? {})) {
+		if (entry && typeof entry.keyEnv === 'string' && entry.keyEnv) keys.add(entry.keyEnv);
+	}
+	keys.add('OPENCODE_GO_API_KEY');
+	return [...keys].sort().map((key) => ({ key, value: String(env[key] ?? '') }));
+}
+
+/**
+ * @param {http.ServerResponse} res
+ * @param {number} status
+ * @param {string} html
+ */
+function sendHtml(res, status, html) {
+	res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+	res.end(html);
+}
+
+/**
+ * @param {{
+ *   answer: (payload: any) => Promise<any>, provider?: string, chain?: string[], model?: string,
+ *   maxBodyBytes?: number, host?: string, port?: number, k?: number, startedAt?: number,
+ *   logFile?: string, quotaFile?: string, providersFile?: string, contractFile?: string,
+ *   env?: Record<string, string | undefined>
+ * }} options
+ */
 export function createServer(options) {
-	const { answer, provider = 'unknown', chain, model = '', maxBodyBytes = MAX_BODY_BYTES } = options;
+	const {
+		answer,
+		provider = 'unknown',
+		chain,
+		model = '',
+		maxBodyBytes = MAX_BODY_BYTES,
+		host = HOST,
+		port = 8787,
+		k = 3,
+		startedAt = Date.now(),
+		logFile = '',
+		quotaFile = '',
+		providersFile = '',
+		contractFile = '',
+		env = {}
+	} = options;
 	const chainList = Array.isArray(chain) && chain.length > 0 ? [...chain] : [provider];
 
 	return http.createServer((req, res) => {
@@ -142,19 +236,58 @@ export function createServer(options) {
 				return sendJson(res, status, result);
 			}
 
-			if (url.pathname === '/') {
-				res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-				res.end(
-					[
-						`baize (${COMPAT})`,
-						'',
-						'POST /answer   OCS 题库接口（JSON）',
-						'GET  /health   健康检查',
-						'',
-						'日志：logs/answers.jsonl'
-					].join('\n')
-				);
+			if (url.pathname === '/' || url.pathname === '/dashboard' || url.pathname === '/settings') {
+				if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method_not_allowed' });
+				const records = readLogRecords(logFile);
+				let html;
+				if (url.pathname === '/dashboard') {
+					const quota = readJsonFile(quotaFile);
+					html = generateDashboard({ records, quota, now: new Date(), logPath: logFile || 'logs/answers.jsonl' });
+				} else if (url.pathname === '/settings') {
+					html = renderSettings({
+						envRows: envRows(env, providersFile),
+						contractText: readContract(contractFile, port),
+						host,
+						port,
+						providersFile,
+						quotaFile
+					});
+				} else {
+					html = renderHome({
+						compat: COMPAT,
+						chain: chainList,
+						model,
+						host,
+						port,
+						k,
+						startedAt,
+						records,
+						logFile: logFile || 'logs/answers.jsonl',
+						hasQuota: Boolean(readJsonFile(quotaFile))
+					});
+				}
+				sendHtml(res, 200, html);
 				return;
+			}
+
+			if (url.pathname === '/api/status') {
+				if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method_not_allowed' });
+				const records = readLogRecords(logFile);
+				const last = records[records.length - 1];
+				return sendJson(res, 200, {
+					ok: true,
+					service: 'baize',
+					compat: COMPAT,
+					chain: chainList,
+					model,
+					host,
+					port,
+					k,
+					uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+					records: records.length,
+					lastOutcome: last?.outcome ?? null,
+					lastTs: last?.ts ?? null
+				});
 			}
 
 			return sendJson(res, 404, { ok: false, reason: 'not_found' });
@@ -173,6 +306,7 @@ export function createServer(options) {
  */
 export function start(env = process.env) {
 	loadDotenv();
+	const startedAt = Date.now();
 	const config = loadConfig(env);
 	const provider = createRouter({
 		providers: config.providers,
@@ -193,7 +327,16 @@ export function start(env = process.env) {
 		answer,
 		provider: config.chain[0],
 		chain: config.chain,
-		model: provider.model
+		model: provider.model,
+		host: config.host,
+		port: config.port,
+		k: config.k,
+		startedAt,
+		logFile: config.logFile,
+		quotaFile: path.join(ROOT, 'config', 'go-quota.json'),
+		providersFile: path.join(ROOT, 'config', 'providers.json'),
+		contractFile: path.join(ROOT, 'contract', 'answerer.json'),
+		env
 	});
 
 	server.on('error', (error) => {
@@ -201,9 +344,9 @@ export function start(env = process.env) {
 		process.exitCode = 1;
 	});
 
-	server.listen(config.port, HOST, () => {
+	server.listen(config.port, config.host, () => {
 		console.log(
-			`[baize] listening on http://${HOST}:${config.port}  chain=${config.chain.join('>')}  model=${provider.model}  k=${config.k}`
+			`[baize] listening on http://${config.host}:${config.port}  chain=${config.chain.join('>')}  model=${provider.model}  k=${config.k}`
 		);
 		return server;
 	});

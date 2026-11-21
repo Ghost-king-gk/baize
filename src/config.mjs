@@ -126,6 +126,7 @@ export function loadConfig(env = process.env) {
 		baseUrl: first.baseUrl,
 		apiKey: first.apiKey,
 		model: first.model,
+		host: env.ANSWERER_HOST?.trim() || HOST,
 		port: intFromEnv(env.ANSWERER_PORT, 8787, 1, 65535, 'ANSWERER_PORT'),
 		k: intFromEnv(env.ANSWERER_K, 3, 1, 10, 'ANSWERER_K'),
 		marginThreshold: floatFromEnv(env.ANSWERER_MARGIN, 0.15, 0, 1, 'ANSWERER_MARGIN'),

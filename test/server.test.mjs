@@ -117,9 +117,13 @@ test('GET /health、GET /、404、405', async () => {
 		assert.equal(healthBody.provider, 'mock');
 		assert.equal(healthBody.compat, 'ocsjs 5.4.2 @ 09628b7');
 
+		// `/` 现在是管理页（HTML），不再是纯文本接口清单
 		const root = await fetch(`${base}/`);
 		assert.equal(root.status, 200);
-		assert.match(await root.text(), /POST \/answer/);
+		assert.match(root.headers.get('content-type') ?? '', /text\/html/);
+		const rootHtml = await root.text();
+		assert.ok(rootHtml.includes('服务状态'));
+		assert.ok(rootHtml.includes('/answer'), '管理页要说明答题接口');
 
 		const missing = await fetch(`${base}/nope`);
 		assert.equal(missing.status, 404);

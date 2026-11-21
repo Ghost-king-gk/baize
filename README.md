@@ -37,7 +37,9 @@ curl -s -X POST 127.0.0.1:8787/answer \
 # {"ok":true,"answer":"C. 3"}
 ```
 
-- **Windows**：[docs/windows.md](docs/windows.md)（装 Node、`start.bat`、开机自启、常见问题）
+- **Windows**：[docs/windows.md](docs/windows.md)（免安装运行时、`start.bat`、开机自启、常见问题）
+- **Docker**：[docs/docker.md](docs/docker.md)（`docker compose up -d --build`）
+- **管理页**：启动后打开 <http://127.0.0.1:8787/>（状态 / 看板 / 只读配置）
 - **接入 OCS**：把 [`contract/answerer.json`](contract/answerer.json) 的内容贴进面板的「题库配置」
 - **看额度与耗时**：`node tools/dashboard.mjs` 生成 `dashboard.html`，见 [docs/dashboard.md](docs/dashboard.md)
 - **不联网先试**：`ANSWERER_PROVIDER=mock ANSWERER_MOCK_LETTERS=3 node src/server.mjs`（固定回答第 3 个选项）

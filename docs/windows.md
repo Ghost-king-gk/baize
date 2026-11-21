@@ -76,6 +76,30 @@ curl.exe -sS -X POST 127.0.0.1:8787/answer -H "Content-Type: application/json" -
 
 面板里会显示「白泽」。之后进入作业/考试页就会自动答题。
 
+## 5.5 另外两种跑法
+
+### 不想装 Node：用自带的运行时
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\win-portable.ps1
+scripts\start.bat
+```
+
+第一条会把 `node.exe` 下到仓库的 `runtime\` 目录（约 80MB），之后 `start.bat` 优先用它，
+系统里装没装 Node 都不影响。卸载时删目录即可。
+
+### 用 Docker Desktop
+
+装好 Docker Desktop 后：
+
+```powershell
+copy .env.example .env
+notepad .env
+docker compose up -d --build
+```
+
+服务同样只发布在 `127.0.0.1:8787`。详见 [docker.md](docker.md)。
+
 ## 6. 开机自启（可选）
 
 最省事：把 `scripts\start.bat` 的快捷方式丢进启动目录。
