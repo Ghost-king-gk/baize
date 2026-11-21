@@ -14,21 +14,18 @@ OCS（网课助手）的 **AI 题库兼容层**。它自己不做题库，只做
 
 ## 一分钟启动
 
+要求 Node.js **22+**（`node -v` 确认）；零依赖，不需要 `npm install`。
+
 ```bash
-cd baize
-
-# 1) 真实模型：复制配置并填 base url / key / model
-cp .env.example .env
+git clone https://github.com/Ghost-king-gk/baize.git && cd baize
+cp .env.example .env          # 填 OPENCODE_GO_API_KEY
 node src/server.mjs
-
-# 2) 只想先看它跑起来（mock provider，不联网，固定回答第 3 个选项）
-ANSWERER_PROVIDER=mock ANSWERER_MOCK_LETTERS=3 node src/server.mjs
 ```
 
 看到这一行就成功了：
 
 ```
-[baize] listening on http://127.0.0.1:8787  chain=openai  model=...  k=3
+[baize] listening on http://127.0.0.1:8787  chain=opencode-go  model=...  k=3
 ```
 
 冒烟测试：
@@ -39,6 +36,11 @@ curl -s -X POST 127.0.0.1:8787/answer \
   -d '{"title":"1+2=?","type":"single","options":"A. 1\nB. 2\nC. 3\nD. 4"}'
 # {"ok":true,"answer":"C. 3"}
 ```
+
+- **Windows**：[docs/windows.md](docs/windows.md)（装 Node、`start.bat`、开机自启、常见问题）
+- **接入 OCS**：把 [`contract/answerer.json`](contract/answerer.json) 的内容贴进面板的「题库配置」
+- **看额度与耗时**：`node tools/dashboard.mjs` 生成 `dashboard.html`，见 [docs/dashboard.md](docs/dashboard.md)
+- **不联网先试**：`ANSWERER_PROVIDER=mock ANSWERER_MOCK_LETTERS=3 node src/server.mjs`（固定回答第 3 个选项）
 
 ## 多 provider 与故障转移
 
