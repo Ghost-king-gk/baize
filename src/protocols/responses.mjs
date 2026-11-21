@@ -35,7 +35,8 @@ export function buildRequest(input) {
 	const { provider, model, prompt, maxTokens, temperature = 0, signal } = input;
 
 	const accountId = provider.accountId ?? provider.account_id ?? '';
-	const isOauth = provider.auth === 'oauth' || provider.protocol === 'openai-oauth';
+	const isOauth =
+		provider.auth === 'oauth' || provider.auth === 'codex-oauth' || provider.protocol === 'openai-oauth';
 	if (isOauth && !accountId) {
 		// 本地配置问题：不要带着空 header 去换一个 401，直接告诉用户缺什么。
 		throw new ProtocolError(
