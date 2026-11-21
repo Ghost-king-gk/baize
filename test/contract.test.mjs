@@ -11,7 +11,9 @@ test('contract/answerer.json：字段齐全，地址只指向本机', () => {
 	assert.equal(contract.length, 1);
 
 	const wrapper = contract[0];
-	assert.equal(wrapper.name, 'MyAI');
+	// OCS 的 AnswerWrapperParser 只要求 name 是非空字符串（parser.ts:15-17），
+	// 显示名属于产品命名，不该被测试钉死。
+	assert.ok(typeof wrapper.name === 'string' && wrapper.name.trim().length > 0);
 	assert.equal(wrapper.url, 'http://127.0.0.1:8787/answer');
 	assert.equal(wrapper.homepage, 'http://127.0.0.1:8787');
 	assert.equal(wrapper.method, 'post');
