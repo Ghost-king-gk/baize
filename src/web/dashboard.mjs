@@ -101,6 +101,8 @@ function stackedChart(days, colors, metric) {
 	let cumulative = 0;
 	/** @type {Array<[number, number]>} */
 	const cumulativePoints = [];
+	// 累计线按「总量」归一化，否则多日累计会冲出画布，只剩第一根柱子旁边一截毛刺
+	const grand = totals.reduce((sum, value) => sum + value, 0) || 1;
 
 	days.forEach((day, index) => {
 		const x = pad.left + slot * index + (slot - barW) / 2;
@@ -121,7 +123,7 @@ function stackedChart(days, colors, metric) {
 		}
 
 		cumulative += totals[index];
-		cumulativePoints.push([pad.left + slot * index + slot / 2, pad.top + plotH - (cumulative / max) * plotH]);
+		cumulativePoints.push([pad.left + slot * index + slot / 2, pad.top + plotH - (cumulative / grand) * plotH]);
 
 		// 日期标签：多了就隔几天标一个
 		const every = Math.ceil(days.length / 8);
@@ -209,8 +211,15 @@ function histogram(buckets, p50, p95) {
 	])) {
 		if (value === null || value > buckets.length * 500) continue;
 		const x = pad.left + (value / 500) * slot;
+		// 两条参考线可能只差几十像素，标签必须错行，否则近距时会压字
+		const text = `${label} ${Math.round(value)}ms`;
+		const labelW = text.length * 6.2;
+		const overflow = x + 4 + labelW > width - pad.right;
+		const textX = overflow ? x - 4 : x + 4;
+		const anchor = overflow ? ' text-anchor="end"' : '';
+		const textY = pad.top + 10 + (label === 'p50' ? 0 : 14);
 		parts.push(`<line x1="${x.toFixed(1)}" y1="${pad.top}" x2="${x.toFixed(1)}" y2="${pad.top + plotH}" stroke="${color}" stroke-width="1" stroke-dasharray="3 3"/>`);
-		parts.push(`<text x="${(x + 4).toFixed(1)}" y="${pad.top + 10}" class="axis" fill="${color}">${label} ${Math.round(value)}ms</text>`);
+		parts.push(`<text x="${textX.toFixed(1)}" y="${textY}" class="axis"${anchor} fill="${color}">${text}</text>`);
 	}
 
 	for (let i = 0; i < buckets.length; i += 4) {
