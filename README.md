@@ -42,7 +42,7 @@ curl -s -X POST 127.0.0.1:8787/answer \
 
 ## 多 provider 与故障转移
 
-供应商是**数据**：预设表在 [`config/providers.json`](config/providers.json)，本地覆盖放 `config/providers.local.json`（已 gitignore）。三种线格式都按官方 API 手写：
+供应商是**数据**：预设表在 [`config/providers.json`](config/providers.json)，本地覆盖放 `config/providers.local.json`（已 gitignore）。四种线格式（openai / anthropic / gemini / responses）都按官方 API 手写：
 
 | id | 协议 | baseUrl | 密钥环境变量 | 需填 model |
 | --- | --- | --- | --- | --- |
@@ -109,33 +109,62 @@ ANSWERER_CHAIN=openai,deepseek node src/server.mjs
 
 然后把 `my-gateway` 加进 `ANSWERER_CHAIN`。常规供应商的 `protocol` 只能是 `openai` / `anthropic` / `gemini`（OAuth 两种见下）；`keyEnv: null` 表示本地服务无需鉴权；`baseUrl` 留空会在启动时报错，而不是悄悄请求错误地址。
 
-### 订阅 OAuth（experimental，默认关闭）
+### 订阅 OAuth（实验性，默认关闭）
 
-预设表里**没有** OAuth 供应商，只有你显式写进 `providers.local.json` 才会启用：
+预设表里**没有** OAuth 供应商，只有你显式写进 `config/providers.local.json` 才会启用。它们直接读取已经登录的 Claude Code / Codex 凭据，用订阅额度调 API，不需要 API key。
+
+#### Claude Code（Anthropic Messages API）
 
 ```json
 {
 	"claude-oauth": {
-		"label": "Claude 订阅",
+		"label": "Claude 订阅（Claude Code）",
 		"protocol": "anthropic-oauth",
+		"auth": "oauth",
 		"baseUrl": "https://api.anthropic.com/v1",
-		"keyEnv": "ANTHROPIC_OAUTH_TOKEN",
-		"model": "<你的 Claude 订阅模型 id>"
-	},
-	"codex-oauth": {
-		"label": "OpenAI 订阅",
-		"protocol": "openai-oauth",
-		"baseUrl": "https://api.openai.com/v1",
-		"keyEnv": "OPENAI_OAUTH_TOKEN",
-		"model": "<你的 OpenAI 订阅模型 id>"
+		"keyEnv": null,
+		"model": "<你的 Claude 订阅模型 id>",
+		"impersonate": false
 	}
 }
 ```
 
-- `anthropic-oauth` 从 `ANTHROPIC_OAUTH_TOKEN` 取 token；未设置时只读 `~/.claude/.credentials.json` 的 access token，不会扫描其它凭据目录。请求用 `Authorization: Bearer` + `anthropic-version` + `anthropic-beta: oauth-2025-04-20`。
-- `openai-oauth` 从 `OPENAI_OAUTH_TOKEN` 取 token，仍走 `chat/completions`。
+- 请求头：`Authorization: Bearer <token>`（**不再发** `x-api-key`）、`anthropic-version: 2023-06-01`、`anthropic-beta: claude-code-20250219,oauth-2025-04-20`。两个 beta 标记都发，顺序固定。
+- 凭据优先级：环境变量 `ANTHROPIC_OAUTH_TOKEN` → `~/.claude/.credentials.json` 的 `claudeAiOauth.accessToken`。
+- `claudeAiOauth.expiresAt` 是毫秒时间戳；已过期会在启动时直接报错，并提示重新运行 `claude setup-token`，不会带着死 token 去换 401。
+- `impersonate` 默认 `false`。设为 `true` 时额外发送 `x-app: cli` 和 Claude Code 风格的 `User-Agent`（默认 `claude-cli/1.0.0 (external, cli)`），并在 prompt 最前面注入一行 `You are Claude Code, Anthropic's official CLI for Claude.`，后接两个换行再接原 prompt。也可以把 `impersonate` 直接写成自定义 User-Agent 字符串，例如 `"impersonate": "claude-cli/2.0.0 (external, cli)"`。
 
-**风险自负**：这类 token 属于订阅客户端（Claude Code / Codex 等），拿它驱动第三方服务可能违反供应商条款，也可能随时被吊销或改协议。baize 不代管账号，出问题请自己承担。
+#### Codex（OpenAI Responses API）
+
+```json
+{
+	"codex-oauth": {
+		"label": "ChatGPT 订阅（Codex）",
+		"protocol": "openai-oauth",
+		"auth": "codex-oauth",
+		"baseUrl": "https://chatgpt.com/backend-api/codex",
+		"keyEnv": null,
+		"model": "<你的 Codex 模型 id>"
+	}
+}
+```
+
+- 端点固定 `POST {baseUrl}/responses`，走 Responses API，**不是** `chat/completions`。
+- 请求头：`Authorization: Bearer <token>`、`chatgpt-account-id: <account_id>`、`originator: codex_cli_rs`。
+- 请求体：`input: [{ role: "user", content: [{ type: "input_text", text: "<prompt>" }] }]`，配 `max_output_tokens` 与 `temperature: 0`。
+- 响应解析：优先收集 `output[].content[]` 里 `type === "output_text"` 的 `text`；为空时回退便捷字段 `output_text`。`status === "incomplete"` 或 `incomplete_details.reason === "max_output_tokens"` 一律按截断处理（`invalid_output`），不会把半截答案交给 OCS。
+- 凭据优先级：`OPENAI_OAUTH_TOKEN`（可选 `OPENAI_ACCOUNT_ID`）→ `~/.codex/auth.json` 的 `tokens.access_token` / `tokens.account_id`。文件里没有 account_id 时，从 JWT 的 `https://api.openai.com/auth.chatgpt_account_id` 解。
+- JWT 解析只做 base64url decode，**不校验签名**（baize 不是签发方）。结构不对或 payload 不是 JSON 时会报出具体原因；如果用的是不透明 token，请显式设置 `OPENAI_ACCOUNT_ID`。
+
+#### 凭据错误与日志
+
+凭据读取会把「文件不存在」「无权限」「JSON 损坏」「字段缺失」「token 已过期」分开报错，并给出对应的登录命令提示。OAuth token 只存在于内存中的 provider 配置里，不写盘、不进日志；故障转移日志仍然只打印 provider id 与状态码，不打印 token、请求头或请求体。
+
+**风险自负**：这类 token 属于订阅客户端（Claude Code / Codex），拿它驱动第三方服务可能违反供应商条款，也可能随时被吊销或改协议。baize 不代管账号、不刷新 token，出问题请自己承担。
+
+**Gemini 没有等价路径**：Google 公开的 SDK 只有 API key 与 Vertex AI 两条路；Gemini CLI 的 OAuth 走的是 Code Assist 内部端点，不是可复用的公开接口面，所以本服务不实现 Gemini 订阅。
+
+> **未在真实订阅上验证过**：以上实现按 cc-switch 的请求形态编写，并用离线假 token 验证了请求头、请求体与 JWT 解析；手头没有可用的 Claude / ChatGPT 订阅账号，真实网络行为未验证。
 
 ## 接入 OCS
 
@@ -223,7 +252,7 @@ OCS 的匹配器对答案字符串有硬性要求，格式错了就是「搜不�
 
 ## 模型调用与自洽采样
 
-- 每家 provider 按自己的官方线格式发请求：OpenAI `POST {baseUrl}/chat/completions`、Anthropic `POST {baseUrl}/messages`、Gemini `POST {baseUrl}/models/{model}:generateContent`；统一 `temperature: 0`，`max_tokens: 32`（填空 600），不流式、无工具。
+- 每家 provider 按自己的官方线格式发请求：OpenAI `POST {baseUrl}/chat/completions`、Anthropic `POST {baseUrl}/messages`、Gemini `POST {baseUrl}/models/{model}:generateContent`、Responses `POST {baseUrl}/responses`；统一 `temperature: 0`，`max_tokens` / `max_output_tokens` 为 32（填空 600），不流式、无工具。
 - prompt 只要求输出序号：`3` 或 `1,3`；选项以 `1) 2) 3)` 展示，**模型看不到也不需要输出 A/B/C**。
 - 同一题并行打 K 次（`Promise.all`，墙钟≈一次），每次**独立打乱选项顺序**（Fisher-Yates，同时消位置偏置），模型输出映射回原始下标后取多数票。
 - K 次里没有过半共识（`winner.count * 2 <= K`）→ `low_confidence`。
@@ -247,8 +276,11 @@ OCS 的匹配器对答案字符串有硬性要求，格式错了就是「搜不�
 | `ANSWERER_LOG` | `1` | `0` 关闭 JSONL 埋点 |
 | `ANSWERER_LOG_FILE` | `logs/answers.jsonl` | 埋点文件 |
 | `ANSWERER_LOGPROBS` | `0` | `1` 时请求 logprobs（只对 openai 协议生效；网关不支持会 400） |
+| `ANTHROPIC_OAUTH_TOKEN` | 空 | Claude Code 订阅 token；设置后优先于 `~/.claude/.credentials.json` |
+| `OPENAI_OAUTH_TOKEN` | 空 | Codex 订阅 token；设置后优先于 `~/.codex/auth.json` |
+| `OPENAI_ACCOUNT_ID` | 空 | Codex 的 `chatgpt-account-id`；设置后覆盖凭据文件 / JWT 里的值 |
 
-服务只读 `ANSWERER_*` 变量和预设表里 `keyEnv` 指定的变量；宿主机上的其它 API key 不会被自动采用。`.env` 与 `config/providers.local.json` 都已在 `.gitignore` 里。
+服务只读 `ANSWERER_*` 变量、预设表里 `keyEnv` 指定的变量，以及 OAuth 模式下的 `ANTHROPIC_OAUTH_TOKEN` / `OPENAI_OAUTH_TOKEN` / `OPENAI_ACCOUNT_ID`；宿主机上的其它 API key 不会被自动采用。`.env` 与 `config/providers.local.json` 都已在 `.gitignore` 里。
 
 ## 埋点
 
@@ -305,7 +337,8 @@ baize/
 │   ├── format.mjs      答案格式化 + OCS 词表/前缀规则（核心算法）
 │   ├── prompt.mjs      提示词构建、打乱顺序、序号/填空解析
 │   ├── providers.mjs   预设表校验、providers.local.json 合并、key 解析
-│   ├── protocols/      openai / anthropic / gemini 三种线格式 + 共用 HTTP
+│   ├── oauth.mjs       订阅 OAuth 凭据读取、JWT payload 解析、Claude Code 指纹常量
+│   ├── protocols/      openai / anthropic / gemini / responses 四种线格式 + 共用 HTTP
 │   ├── router.mjs      故障转移链、可重试错误分类、进程内熔断
 │   ├── provider.mjs    AnswerProvider：openai（单家兼容） / mock
 │   ├── service.mjs     自洽采样、多数票、重试、弃权、埋点

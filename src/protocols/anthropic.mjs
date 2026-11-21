@@ -1,14 +1,26 @@
 // @ts-check
 /** Anthropic Messages 线格式（含实验性订阅 OAuth 头）。 */
 
+import {
+	ANTHROPIC_OAUTH_BETA,
+	CLAUDE_CODE_IDENTITY,
+	DEFAULT_CLAUDE_CODE_USER_AGENT
+} from '../oauth.mjs';
 import { ProtocolError } from './http.mjs';
 
 export const ANTHROPIC_VERSION = '2023-06-01';
-export const OAUTH_BETA = 'oauth-2025-04-20';
+export { OAUTH_BETA, CLAUDE_CODE_BETA, ANTHROPIC_OAUTH_BETA } from '../oauth.mjs';
 
 /**
  * @param {{
- *   provider: {baseUrl: string, apiKey?: string, auth?: string},
+ *   provider: {
+ *     baseUrl: string,
+ *     protocol?: string,
+ *     apiKey?: string,
+ *     auth?: string,
+ *     impersonate?: boolean | string,
+ *     userAgent?: string
+ *   },
  *   model: string,
  *   prompt: string,
  *   maxTokens: number,
@@ -26,20 +38,37 @@ export function buildRequest(input) {
 		'anthropic-version': ANTHROPIC_VERSION
 	};
 
-	if (provider.auth === 'oauth' && provider.apiKey) {
-		// 订阅 OAuth：Bearer + beta 头，不能再用 x-api-key。
+	const isOauth = provider.auth === 'oauth' || provider.protocol === 'anthropic-oauth';
+
+	if (isOauth && provider.apiKey) {
+		// 订阅 OAuth：Bearer + 两个 beta 标记，不能再发 x-api-key。
 		headers.Authorization = `Bearer ${provider.apiKey}`;
-		headers['anthropic-beta'] = OAUTH_BETA;
+		headers['anthropic-beta'] = ANTHROPIC_OAUTH_BETA;
+
+		if (provider.impersonate) {
+			// 可选指纹伪装：只有用户显式开启才发，避免向普通网关暴露 Claude Code 身份。
+			headers['x-app'] = 'cli';
+			headers['User-Agent'] =
+				typeof provider.impersonate === 'string'
+					? provider.impersonate
+					: provider.userAgent || DEFAULT_CLAUDE_CODE_USER_AGENT;
+		}
 	} else if (provider.apiKey) {
 		headers['x-api-key'] = provider.apiKey;
 	}
+
+	// Claude 订阅套餐要求首条内容以 Claude Code 身份开头；伪装关闭时保持原 prompt 不变。
+	const text =
+		isOauth && provider.impersonate
+			? `${CLAUDE_CODE_IDENTITY}\n\n${prompt}`
+			: prompt;
 
 	const body = {
 		model,
 		// max_tokens 在 Anthropic 是必填字段。
 		max_tokens: maxTokens,
 		temperature,
-		messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }]
+		messages: [{ role: 'user', content: [{ type: 'text', text }] }]
 	};
 
 	return {

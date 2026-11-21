@@ -104,8 +104,9 @@ test('anthropic.buildRequest：OAuth 用 Bearer + beta 头，不再发 x-api-key
 	});
 
 	assert.equal(init.headers.Authorization, 'Bearer oauth-token');
-	assert.equal(init.headers['anthropic-beta'], 'oauth-2025-04-20');
+	assert.equal(init.headers['anthropic-beta'], 'claude-code-20250219,oauth-2025-04-20');
 	assert.equal(init.headers['x-api-key'], undefined);
+	assert.equal(init.headers['x-app'], undefined, '默认不伪装指纹');
 });
 
 test('anthropic.parseResponse：拼接 text block，忽略非 text；margin 恒为 null', () => {

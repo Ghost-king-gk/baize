@@ -15,8 +15,23 @@ import { ProtocolError, fetchJson } from './protocols/http.mjs';
 import * as anthropic from './protocols/anthropic.mjs';
 import * as gemini from './protocols/gemini.mjs';
 import * as openai from './protocols/openai.mjs';
+import * as responses from './protocols/responses.mjs';
 
-const ADAPTERS = { openai, anthropic, gemini };
+const ADAPTERS = { openai, anthropic, gemini, responses };
+
+/**
+ * 显式协议映射：不要再按 `-oauth` 后缀粗暴剥离。
+ * `openai-oauth` 走 Responses API，而不是 chat/completions。
+ * @type {Record<string, keyof typeof ADAPTERS>}
+ */
+const PROTOCOL_ADAPTERS = {
+	openai: 'openai',
+	anthropic: 'anthropic',
+	gemini: 'gemini',
+	'anthropic-oauth': 'anthropic',
+	'openai-oauth': 'responses',
+	responses: 'responses'
+};
 
 /** 这些 finishReason 表示输出被截断，答案不可信。 */
 const TRUNCATED_REASONS = new Set(['length', 'max_tokens', 'MAX_TOKENS']);
@@ -167,9 +182,13 @@ export function createRouter(config) {
 			return { ...result, provider: provider.id, model: provider.model ?? 'mock' };
 		}
 
-		const wireProtocol = String(provider.protocol ?? '').replace(/-oauth$/, '');
-		const adapter = ADAPTERS[/** @type {keyof typeof ADAPTERS} */ (wireProtocol)];
-		if (!adapter) throw new ProviderError(`未知协议: ${provider.protocol}`);
+		const adapterName = PROTOCOL_ADAPTERS[/** @type {keyof typeof PROTOCOL_ADAPTERS} */ (provider.protocol)];
+		const adapter = adapterName ? ADAPTERS[adapterName] : undefined;
+		if (!adapter) {
+			throw new ProviderError(
+				`未知协议: ${provider.protocol}（支持: ${Object.keys(PROTOCOL_ADAPTERS).join(', ')}）`
+			);
+		}
 
 		if (!provider.baseUrl) throw new ProviderError(`provider "${provider.id}" 缺少 baseUrl`);
 		if (!provider.model) throw new ProviderError(`provider "${provider.id}" 缺少 model`);

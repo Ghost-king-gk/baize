@@ -7,14 +7,21 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { readClaudeOAuth, readCodexOAuth } from './oauth.mjs';
 
 /** 预设表允许的线协议（严格照官方 API）。 */
 export const PROTOCOLS = ['openai', 'anthropic', 'gemini'];
 
 /** 实验性协议：只允许出现在 providers.local.json，预设表里没有。 */
 export const OAUTH_PROTOCOLS = ['anthropic-oauth', 'openai-oauth'];
+
+/** OAuth 协议对应的 auth 标记；用户可以显式写，也可以省略。 */
+export const OAUTH_AUTH_MODES = { 'anthropic-oauth': 'oauth', 'openai-oauth': 'codex-oauth' };
+
+/** providers.local.json 里允许的 auth 取值。 */
+const AUTH_MODES = ['api-key', 'oauth', 'codex-oauth', 'none'];
 
 /** @typedef {{
  *   id: string,
@@ -24,7 +31,10 @@ export const OAUTH_PROTOCOLS = ['anthropic-oauth', 'openai-oauth'];
  *   keyEnv: string | null,
  *   model?: string,
  *   apiKey?: string,
- *   auth?: string
+ *   auth?: string,
+ *   accountId?: string | null,
+ *   impersonate?: boolean | string,
+ *   userAgent?: string
  * }} ProviderEntry */
 
 /**
@@ -78,6 +88,24 @@ export function normalizeProvider(id, entry, options = {}) {
 
 	if (!allowed.includes(entry.protocol)) {
 		throw new Error(`provider "${id}" 的 protocol 必须是 ${allowed.join('|')}，收到: ${String(entry.protocol)}`);
+	}
+
+	if (entry.auth !== undefined && !AUTH_MODES.includes(entry.auth)) {
+		throw new Error(`provider "${id}" 的 auth 必须是 ${AUTH_MODES.join('|')}，收到: ${String(entry.auth)}`);
+	}
+	const expectedAuth = OAUTH_AUTH_MODES[/** @type {keyof typeof OAUTH_AUTH_MODES} */ (entry.protocol)];
+	if (expectedAuth && entry.auth && entry.auth !== expectedAuth) {
+		throw new Error(
+			`provider "${id}" 的 protocol=${entry.protocol} 需要 auth="${expectedAuth}"，收到: ${String(entry.auth)}`
+		);
+	}
+
+	if (
+		entry.impersonate !== undefined &&
+		typeof entry.impersonate !== 'boolean' &&
+		(typeof entry.impersonate !== 'string' || entry.impersonate.trim() === '')
+	) {
+		throw new Error(`provider "${id}" 的 impersonate 必须是布尔值或自定义 User-Agent 字符串`);
 	}
 
 	if (source === 'preset' && Object.prototype.hasOwnProperty.call(entry, 'model')) {
@@ -142,29 +170,15 @@ export function loadProviderTable(options) {
 }
 
 /**
- * 只读取 ~/.claude/.credentials.json 里的 access token。
- * 这是 Claude Code 自己的凭据文件；代码不会遍历其它凭据目录。
- * @returns {string}
- */
-export function readClaudeAccessToken() {
-	const file = path.join(os.homedir(), '.claude', '.credentials.json');
-	if (!existsSync(file)) return '';
-	try {
-		const parsed = JSON.parse(readFileSync(file, 'utf8'));
-		const token = parsed?.claudeAiOauth?.accessToken ?? parsed?.accessToken;
-		return typeof token === 'string' ? token.trim() : '';
-	} catch {
-		return '';
-	}
-}
-
-/**
  * 把供应商条目 + 环境变量解析成可直接发请求的配置（含内存中的 key，绝不落盘）。
+ *
+ * OAuth provider 的 token 只从 oauth.mjs 读取（环境变量优先，其次本地凭据文件）；
+ * `keyEnv` 在 OAuth 模式下不参与取值，只作为文档提示保留。
+ *
  * @param {string} id
  * @param {Record<string, ProviderEntry>} table
  * @param {Record<string, string | undefined>} env
  * @param {{baseUrl?: string, apiKey?: string}} [overrides] 仅用于兼容旧配置的 ANSWERER_BASE_URL / ANSWERER_API_KEY
- * @returns {ProviderEntry & {model: string, apiKey: string, auth: string}}
  */
 export function resolveProvider(id, table, env, overrides = {}) {
 	if (id === 'mock') {
@@ -193,26 +207,21 @@ export function resolveProvider(id, table, env, overrides = {}) {
 
 	/** @type {string} */
 	let apiKey = String(overrides.apiKey ?? '').trim();
-	if (!apiKey && entry.keyEnv) apiKey = String(env[entry.keyEnv] ?? '').trim();
-	if (!apiKey && protocol === 'anthropic-oauth') {
-		apiKey = String(env.ANTHROPIC_OAUTH_TOKEN ?? '').trim() || readClaudeAccessToken();
-	}
-	if (!apiKey && protocol === 'openai-oauth') {
-		apiKey = String(env.OPENAI_OAUTH_TOKEN ?? '').trim();
-	}
-	if (isOauth && !apiKey) {
-		const hint = protocol === 'anthropic-oauth' ? 'ANTHROPIC_OAUTH_TOKEN' : 'OPENAI_OAUTH_TOKEN';
-		throw new Error(`provider "${id}" 缺少 OAuth token：请设置 ${entry.keyEnv ?? hint}`);
+	/** @type {string | null} */
+	let accountId = null;
+
+	if (isOauth) {
+		// 显式环境变量 > Claude Code / Codex 的本地凭据文件；具体错误由 oauth.mjs 给出。
+		const credentials =
+			protocol === 'anthropic-oauth' ? readClaudeOAuth({ env }) : readCodexOAuth({ env });
+		if (!apiKey) apiKey = credentials.token;
+		if (protocol === 'openai-oauth') accountId = credentials.accountId ?? null;
+	} else if (!apiKey && entry.keyEnv) {
+		apiKey = String(env[entry.keyEnv] ?? '').trim();
 	}
 
 	if (!apiKey && entry.keyEnv) {
-		const hint =
-			protocol === 'anthropic-oauth'
-				? '（也可设置 ANTHROPIC_OAUTH_TOKEN 或运行 claude 登录）'
-				: protocol === 'openai-oauth'
-					? '（也可设置 OPENAI_OAUTH_TOKEN）'
-					: '';
-		throw new Error(`provider "${id}" 缺少环境变量 ${entry.keyEnv}${hint}`);
+		throw new Error(`provider "${id}" 缺少环境变量 ${entry.keyEnv}`);
 	}
 
 	return {
@@ -220,6 +229,7 @@ export function resolveProvider(id, table, env, overrides = {}) {
 		model,
 		baseUrl,
 		apiKey,
-		auth: isOauth ? 'oauth' : apiKey ? 'api-key' : 'none'
+		auth: isOauth ? 'oauth' : apiKey ? 'api-key' : 'none',
+		...(accountId ? { accountId } : {})
 	};
 }
