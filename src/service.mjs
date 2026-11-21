@@ -118,7 +118,7 @@ export function createService(config) {
 			try {
 				await logger({ ...record });
 			} catch (error) {
-				console.error(`[ocs-answerer] logger 异常: ${/** @type {Error} */ (error)?.message ?? error}`);
+				console.error(`[baize] logger 异常: ${/** @type {Error} */ (error)?.message ?? error}`);
 			}
 			return response;
 		};

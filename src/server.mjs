@@ -104,7 +104,7 @@ export function createServer(options) {
 
 			if (url.pathname === '/health') {
 				if (req.method !== 'GET') return sendJson(res, 405, { ok: false, reason: 'method_not_allowed' });
-				return sendJson(res, 200, { ok: true, service: 'ocs-answerer', compat: COMPAT, provider, model });
+				return sendJson(res, 200, { ok: true, service: 'baize', compat: COMPAT, provider, model });
 			}
 
 			if (url.pathname === '/answer') {
@@ -136,7 +136,7 @@ export function createServer(options) {
 				res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
 				res.end(
 					[
-						`ocs-answerer (${COMPAT})`,
+						`baize (${COMPAT})`,
 						'',
 						'POST /answer   OCS 题库接口（JSON）',
 						'GET  /health   健康检查',
@@ -151,7 +151,7 @@ export function createServer(options) {
 		};
 
 		handle().catch((error) => {
-			console.error('[ocs-answerer] 请求处理失败:', error);
+			console.error('[baize] 请求处理失败:', error);
 			if (!res.headersSent) sendJson(res, 500, { ok: false, reason: 'provider_error' });
 			else res.end();
 		});
@@ -176,13 +176,13 @@ export function start(env = process.env) {
 	const server = createServer({ answer, provider: provider.name, model: provider.model });
 
 	server.on('error', (error) => {
-		console.error(`[ocs-answerer] 启动失败: ${error.message}`);
+		console.error(`[baize] 启动失败: ${error.message}`);
 		process.exitCode = 1;
 	});
 
 	server.listen(config.port, HOST, () => {
 		console.log(
-			`[ocs-answerer] listening on http://${HOST}:${config.port}  provider=${provider.name}  model=${provider.model}  k=${config.k}`
+			`[baize] listening on http://${HOST}:${config.port}  provider=${provider.name}  model=${provider.model}  k=${config.k}`
 		);
 		return server;
 	});

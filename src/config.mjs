@@ -22,7 +22,7 @@ export function loadDotenv() {
 		process.loadEnvFile(file);
 		return true;
 	} catch (error) {
-		console.error(`[ocs-answerer] 读取 .env 失败: ${/** @type {Error} */ (error)?.message ?? error}`);
+		console.error(`[baize] 读取 .env 失败: ${/** @type {Error} */ (error)?.message ?? error}`);
 		return false;
 	}
 }

@@ -1,6 +1,6 @@
 [
 	{
-		"name": "MyAI",
+		"name": "白泽",
 		"homepage": "http://127.0.0.1:8787",
 		"url": "http://127.0.0.1:8787/answer",
 		"method": "post",

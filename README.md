@@ -1,6 +1,8 @@
 兼容 ocsjs 5.4.2 @ 09628b7
 
-# ocs-answerer
+# baize · 白泽
+
+> 《山海经》里的白泽「知万物之情」，能言人语。这个服务做的是同一件事：听懂题目，给出人话的答案。
 
 OCS（网课助手）的 **AI 题库兼容层**。它自己不做题库，只做三件事：
 
@@ -13,7 +15,7 @@ OCS（网课助手）的 **AI 题库兼容层**。它自己不做题库，只做
 ## 一分钟启动
 
 ```bash
-cd ocs-answerer
+cd baize
 
 # 1) 真实模型：复制配置并填 base url / key / model
 cp .env.example .env
@@ -26,7 +28,7 @@ ANSWERER_PROVIDER=mock ANSWERER_MOCK_LETTERS=3 node src/server.mjs
 看到这一行就成功了：
 
 ```
-[ocs-answerer] listening on http://127.0.0.1:8787  provider=openai  model=...
+[baize] listening on http://127.0.0.1:8787  provider=openai  model=...
 ```
 
 冒烟测试：
@@ -102,7 +104,7 @@ curl -s -X POST 127.0.0.1:8787/answer \
 
 `ok:false` 的业务弃权仍返回 HTTP 200；只有 `invalid_request` 返回 400。
 
-`GET /health` 用于探活：`{"ok":true,"service":"ocs-answerer","compat":"ocsjs 5.4.2 @ 09628b7","provider":"...","model":"..."}`。
+`GET /health` 用于探活：`{"ok":true,"service":"baize","compat":"ocsjs 5.4.2 @ 09628b7","provider":"...","model":"..."}`。
 
 ## 答案格式（本项目最核心的部分）
 
@@ -196,7 +198,7 @@ node --test eval/format.test.mjs   # 真实用例评测（也在 node --test 里
 ## 目录结构
 
 ```
-ocs-answerer/
+baize/
 ├── src/
 │   ├── format.mjs      答案格式化 + OCS 词表/前缀规则（核心算法）
 │   ├── prompt.mjs      提示词构建、打乱顺序、序号/填空解析

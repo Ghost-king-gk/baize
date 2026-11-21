@@ -29,7 +29,7 @@ export function createJsonlLogger(config) {
 			await appendFile(config.file, `${JSON.stringify(record)}\n`, 'utf8');
 		} catch (error) {
 			// 埋点失败不能影响答题主流程
-			console.error(`[ocs-answerer] 写日志失败: ${/** @type {Error} */ (error)?.message ?? error}`);
+			console.error(`[baize] 写日志失败: ${/** @type {Error} */ (error)?.message ?? error}`);
 		}
 	};
 }
