@@ -44,10 +44,6 @@ test('config/providers.json：protocol 合法、不写 model、keyEnv 为 null �
 		'minimax',
 		'ollama',
 		'openai',
-		'opencode-anthropic',
-		'opencode-gemini',
-		'opencode-openai',
-		'opencode-responses',
 		'openrouter'
 	]);
 
@@ -314,7 +310,7 @@ test('loadConfig：未知 provider / 缺 key / baseUrl 为空 → 启动即报�
 		() => loadConfig({ ANSWERER_CHAIN: 'openai', ANSWERER_MODEL: 'm' }),
 		/缺少环境变量 OPENAI_API_KEY/
 	);
-	// 预设里已没有空 baseUrl 的条目（opencode-* 都填了），用临时预设构造这个场景
+	// 预设里没有空 baseUrl 的条目，用临时预设构造这个场景
 	withTempProviderFiles(
 		{ empty: { label: 'Empty', protocol: 'openai', baseUrl: '', keyEnv: null } },
 		{},

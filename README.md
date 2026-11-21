@@ -54,10 +54,6 @@ curl -s -X POST 127.0.0.1:8787/answer \
 | `kimi` | openai | `api-key` | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | 是 |
 | `minimax` | openai | `api-key` | `https://api.minimax.chat/v1` | `MINIMAX_API_KEY` | 是 |
 | `openrouter` | openai | `api-key` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | 是 |
-| `opencode-openai` | openai | `bearer` | `https://opencode.ai/inference/openai/v1` | `OPENCODE_GO_API_KEY` | 是 |
-| `opencode-responses` | responses | `bearer` | `https://opencode.ai/inference/openai/v1` | `OPENCODE_GO_API_KEY` | 是 |
-| `opencode-anthropic` | anthropic | `bearer` | `https://opencode.ai/inference/anthropic/v1` | `OPENCODE_GO_API_KEY` | 是 |
-| `opencode-gemini` | gemini | `bearer` | `https://opencode.ai/inference/google/v1beta` | `OPENCODE_GO_API_KEY` | 是 |
 | `ollama` | openai | `api-key` | `http://127.0.0.1:11434/v1` | 无（null） | 是 |
 | `lmstudio` | openai | `api-key` | `http://127.0.0.1:1234/v1` | 无（null） | 是 |
 
@@ -70,22 +66,49 @@ curl -s -X POST 127.0.0.1:8787/answer \
 | `oauth` | Bearer + `anthropic-beta: claude-code-20250219,oauth-2025-04-20`，可选指纹伪装 | Claude 订阅，只能写 `providers.local.json` |
 | `codex-oauth` | Bearer + `originator: codex_cli_rs` + `chatgpt-account-id` | Codex 订阅，只能写 `providers.local.json` |
 
-### OpenCode Inference
+### OpenCode Inference（按官方文档手配，不内置预设）
 
-OpenCode 的 `https://opencode.ai/inference` 同时提供三种协议族，**全部用 Bearer**。一个模型属于哪个族由供应商决定，所以选模型时要选对应的 provider id：
+`https://opencode.ai/inference` 下每个模型只由**一种** API 族提供，四族路径互不相同，认证一律 `Authorization: Bearer <token>`：
 
-| 模型类型 | 用哪个 id | 实际路径 |
-| --- | --- | --- |
-| 开放模型（kimi / glm / minimax） | `opencode-openai` | `/openai/v1/chat/completions` |
-| GPT 系列 | `opencode-responses` | `/openai/v1/responses` |
-| Claude / Qwen 系列 | `opencode-anthropic` | `/anthropic/v1/messages` |
-| Gemini 系列 | `opencode-gemini` | `/google/v1beta/models/<model>:generateContent` |
+| API 族 | 完整路径 |
+| --- | --- |
+| OpenAI Chat Completions | `/inference/openai/v1/chat/completions` |
+| OpenAI Responses | `/inference/openai/v1/responses` |
+| Anthropic Messages | `/inference/anthropic/v1/messages` |
+| Gemini | `/inference/google/v1beta/models/<model>:generateContent` |
+
+baize 不替 OpenCode 做预设，因为用哪个族取决于你选的模型。模型的族见官方 model endpoints 表，或直接查：
 
 ```bash
-OPENCODE_GO_API_KEY=... ANSWERER_CHAIN=opencode-openai ANSWERER_MODEL=<模型 id> node src/server.mjs
+curl -H "Authorization: Bearer $OPENCODE_GO_API_KEY" https://opencode.ai/inference/v1/models
 ```
 
-注意：**免费模型只在 OpenCode 客户端内可用**，第三方客户端即使带 key 也会收到 403；baize 这类外部客户端必须用付费模型或 Go 订阅。每次响应的 `usage` 里会带 `cost` / `opencode.billing_source`，方便核对是不是走的订阅额度。
+确定族之后，在 `config/providers.local.json` 里写一条。`baseUrl` 填到「适配器自己会接后缀」的那一层：
+
+| `protocol` | `baseUrl` | 适配器追加 | 最终请求 |
+| --- | --- | --- | --- |
+| `openai` | `https://opencode.ai/inference/openai/v1` | `/chat/completions` | 同左 |
+| `responses` | `https://opencode.ai/inference/openai/v1` | `/responses` | 同左 |
+| `anthropic` | `https://opencode.ai/inference/anthropic/v1` | `/messages` | 同左 |
+| `gemini` | `https://opencode.ai/inference/google/v1beta` | `/models/<model>:generateContent` | 同左 |
+
+```json
+{
+	"my-model": {
+		"protocol": "anthropic",
+		"auth": "bearer",
+		"baseUrl": "https://opencode.ai/inference/anthropic/v1",
+		"keyEnv": "OPENCODE_GO_API_KEY",
+		"model": "claude-sonnet-5-5"
+	}
+}
+```
+
+```bash
+OPENCODE_GO_API_KEY=... ANSWERER_CHAIN=my-model node src/server.mjs
+```
+
+**免费模型只在 OpenCode 客户端内可用**：其他客户端即使带 key 也会收到 403。baize 属于外部客户端，必须用付费模型或 Go 订阅。每次响应的 `usage` 里带 `cost` 与 `opencode.billing_source`，可以直接核对是不是走的订阅额度（`go` / `go-plus`）。
 
 预设表**绝不写模型 ID**：模型来自全局 `ANSWERER_MODEL`（只适用于单 provider 链），或在 `providers.local.json` 里按 provider 写 `model`。**混合链（`ANSWERER_CHAIN` 多于一家）必须逐家指定 `model`**，否则启动即拒绝，不会拖到第一次请求才发现第二家 404/400：
 

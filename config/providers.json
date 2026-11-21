@@ -47,34 +47,6 @@
 		"baseUrl": "https://openrouter.ai/api/v1",
 		"keyEnv": "OPENROUTER_API_KEY"
 	},
-	"opencode-openai": {
-		"label": "OpenCode · OpenAI 族",
-		"protocol": "openai",
-		"auth": "bearer",
-		"baseUrl": "https://opencode.ai/inference/openai/v1",
-		"keyEnv": "OPENCODE_GO_API_KEY"
-	},
-	"opencode-responses": {
-		"label": "OpenCode · Responses 族",
-		"protocol": "responses",
-		"auth": "bearer",
-		"baseUrl": "https://opencode.ai/inference/openai/v1",
-		"keyEnv": "OPENCODE_GO_API_KEY"
-	},
-	"opencode-anthropic": {
-		"label": "OpenCode · Anthropic 族",
-		"protocol": "anthropic",
-		"auth": "bearer",
-		"baseUrl": "https://opencode.ai/inference/anthropic/v1",
-		"keyEnv": "OPENCODE_GO_API_KEY"
-	},
-	"opencode-gemini": {
-		"label": "OpenCode · Gemini 族",
-		"protocol": "gemini",
-		"auth": "bearer",
-		"baseUrl": "https://opencode.ai/inference/google/v1beta",
-		"keyEnv": "OPENCODE_GO_API_KEY"
-	},
 	"ollama": {
 		"label": "Ollama",
 		"protocol": "openai",
