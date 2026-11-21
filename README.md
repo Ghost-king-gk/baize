@@ -51,10 +51,6 @@ flowchart LR
     F --> H
     G --> H
     H -->|"ok: true"| A
-
-    style B fill:#12151A,stroke:#35C2A8,stroke-width:2px,color:#E6E8EB
-    style C fill:#12151A,stroke:#4EA1FF,color:#E6E8EB
-    style H fill:#12151A,stroke:#E0A458,color:#E6E8EB
 ```
 
 ## 它不是什么
