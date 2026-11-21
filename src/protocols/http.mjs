@@ -1,21 +1,26 @@
 // @ts-check
 /** 三个协议适配器共用的 HTTP 细节：超时/网络错误、非 2xx、JSON 解析。 */
 
+/** 401/403/404：密钥过期、无权限、模型/路径不存在。换下一家，而不是让整题失败。 */
+export const AUTH_FAILURE_STATUSES = new Set([401, 403, 404]);
+
 /**
  * 协议层错误。router 依据 retryable 决定「换下一家」还是「立即抛出」。
- * - retryable: 网络错误、超时、HTTP 408/429/5xx、响应不是 JSON
- * - 致命: 其余 4xx（400/401/403/404…）以及本地配置错误
+ * - retryable: 网络错误、超时、HTTP 408/429/5xx、401/403/404、响应不是 JSON
+ * - authFailure: 401/403/404，router 会打独立的 provider_auth_failed 日志
+ * - 致命: 其余 4xx（400 等）以及本地配置错误
  */
 export class ProtocolError extends Error {
 	/**
 	 * @param {string} message
-	 * @param {{status?: number | null, retryable?: boolean, body?: string, cause?: unknown}} [options]
+	 * @param {{status?: number | null, retryable?: boolean, authFailure?: boolean, body?: string, cause?: unknown}} [options]
 	 */
 	constructor(message, options = {}) {
 		super(message, options.cause === undefined ? undefined : { cause: options.cause });
 		this.name = 'ProtocolError';
 		this.status = options.status ?? null;
 		this.retryable = Boolean(options.retryable);
+		this.authFailure = Boolean(options.authFailure);
 		this.body = options.body ?? '';
 	}
 }
@@ -53,9 +58,13 @@ export async function fetchJson(request, fetchImpl = globalThis.fetch) {
 
 	if (!response.ok) {
 		const body = text.slice(0, 200);
-		throw new ProtocolError(`http_${response.status}: ${body}`, {
-			status: response.status,
-			retryable: response.status === 408 || response.status === 429 || response.status >= 500,
+		const status = response.status;
+		const authFailure = AUTH_FAILURE_STATUSES.has(status);
+		throw new ProtocolError(`http_${status}: ${body}`, {
+			status,
+			// 401/403/404 与 408/429/5xx 一样换下一家；400 等其余 4xx 仍立即抛出。
+			retryable: authFailure || status === 408 || status === 429 || status >= 500,
+			authFailure,
 			body
 		});
 	}

@@ -139,22 +139,46 @@ test('ANSWERER_CHAIN：逗号分隔、去空白、按顺序去重；优先于 AN
 	assert.deepEqual(upper.chain, ['openai']);
 });
 
-test('loadConfig：多 provider 链、全局 model、每家 keyEnv 各自解析', () => {
-	const config = loadConfig({
-		ANSWERER_CHAIN: 'openai,deepseek',
-		ANSWERER_MODEL: 'test-model',
-		OPENAI_API_KEY: 'openai-key',
-		DEEPSEEK_API_KEY: 'deepseek-key'
-	});
+test('loadConfig：多 provider 链逐家指定 model、每家 keyEnv 各自解析', () => {
+	withTempProviderFiles(
+		{
+			openai: {
+				label: 'OpenAI',
+				protocol: 'openai',
+				baseUrl: 'https://api.openai.com/v1',
+				keyEnv: 'OPENAI_API_KEY'
+			},
+			deepseek: {
+				label: 'DeepSeek',
+				protocol: 'openai',
+				baseUrl: 'https://api.deepseek.com/v1',
+				keyEnv: 'DEEPSEEK_API_KEY'
+			}
+		},
+		{
+			openai: { model: 'gpt-test' },
+			deepseek: { model: 'deepseek-test' }
+		},
+		(dir) => {
+			const config = loadConfig({
+				ANSWERER_CHAIN: 'openai,deepseek',
+				ANSWERER_PROVIDERS_FILE: path.join(dir, 'providers.json'),
+				OPENAI_API_KEY: 'openai-key',
+				DEEPSEEK_API_KEY: 'deepseek-key'
+			});
 
-	assert.deepEqual(config.chain, ['openai', 'deepseek']);
-	assert.equal(config.provider, 'openai');
-	assert.equal(config.model, 'test-model');
-	assert.equal(config.providers[0].baseUrl, 'https://api.openai.com/v1');
-	assert.equal(config.providers[0].apiKey, 'openai-key');
-	assert.equal(config.providers[1].baseUrl, 'https://api.deepseek.com/v1');
-	assert.equal(config.providers[1].apiKey, 'deepseek-key');
-	assert.equal(config.providers[1].protocol, 'openai');
+			assert.deepEqual(config.chain, ['openai', 'deepseek']);
+			assert.equal(config.provider, 'openai');
+			assert.equal(config.model, 'gpt-test');
+			assert.equal(config.providers[0].baseUrl, 'https://api.openai.com/v1');
+			assert.equal(config.providers[0].model, 'gpt-test');
+			assert.equal(config.providers[0].apiKey, 'openai-key');
+			assert.equal(config.providers[1].baseUrl, 'https://api.deepseek.com/v1');
+			assert.equal(config.providers[1].model, 'deepseek-test');
+			assert.equal(config.providers[1].apiKey, 'deepseek-key');
+			assert.equal(config.providers[1].protocol, 'openai');
+		}
+	);
 });
 
 test('loadConfig：ANSWERER_CHAIN=mock 不需要 key/model；旧 ANSWERER_PROVIDER=mock 仍可用', () => {
@@ -168,14 +192,84 @@ test('loadConfig：ANSWERER_CHAIN=mock 不需要 key/model；旧 ANSWERER_PROVID
 });
 
 test('loadConfig：旧 ANSWERER_BASE_URL / ANSWERER_API_KEY 覆盖链上第一家', () => {
+	withTempProviderFiles(
+		{
+			openai: {
+				label: 'OpenAI',
+				protocol: 'openai',
+				baseUrl: 'https://api.openai.com/v1',
+				keyEnv: 'OPENAI_API_KEY'
+			}
+		},
+		{ openai: { model: 'gpt-test' } },
+		(dir) => {
+			const config = loadConfig({
+				ANSWERER_CHAIN: 'openai,mock',
+				ANSWERER_PROVIDERS_FILE: path.join(dir, 'providers.json'),
+				ANSWERER_BASE_URL: 'http://127.0.0.1:9/v1',
+				ANSWERER_API_KEY: 'legacy-key'
+			});
+			assert.equal(config.providers[0].baseUrl, 'http://127.0.0.1:9/v1');
+			assert.equal(config.providers[0].apiKey, 'legacy-key');
+			assert.equal(config.providers[0].model, 'gpt-test');
+			assert.equal(config.providers[1].id, 'mock');
+		}
+	);
+});
+
+test('loadConfig：混合链缺 model → 拒绝启动，并给出可照抄的修复示例', () => {
+	withTempProviderFiles(
+		{
+			deepseek: {
+				label: 'DeepSeek',
+				protocol: 'openai',
+				baseUrl: 'https://api.deepseek.com/v1',
+				keyEnv: 'DEEPSEEK_API_KEY'
+			},
+			openai: {
+				label: 'OpenAI',
+				protocol: 'openai',
+				baseUrl: 'https://api.openai.com/v1',
+				keyEnv: 'OPENAI_API_KEY'
+			}
+		},
+		{},
+		(dir) => {
+			assert.throws(
+				() =>
+					loadConfig({
+						ANSWERER_CHAIN: 'deepseek,openai',
+						ANSWERER_PROVIDERS_FILE: path.join(dir, 'providers.json'),
+						ANSWERER_MODEL: 'global-model',
+						DEEPSEEK_API_KEY: 'deepseek-key',
+						OPENAI_API_KEY: 'openai-key'
+					}),
+				(error) => {
+					assert.match(error.message, /ANSWERER_CHAIN=deepseek,openai 包含多个 provider/);
+					assert.match(error.message, /provider "deepseek" 缺少 model；混合链必须逐家指定/);
+					assert.match(error.message, /provider "openai" 缺少 model；混合链必须逐家指定/);
+					assert.match(
+						error.message,
+						/\{ "deepseek": \{ "model": "<该供应商的模型 id>" \} \}/,
+						'错误信息要能直接照抄'
+					);
+					return true;
+				}
+			);
+		}
+	);
+});
+
+test('loadConfig：单 provider 链允许只用全局 ANSWERER_MODEL', () => {
 	const config = loadConfig({
-		ANSWERER_CHAIN: 'openai,mock',
-		ANSWERER_BASE_URL: 'http://127.0.0.1:9/v1',
-		ANSWERER_API_KEY: 'legacy-key',
-		ANSWERER_MODEL: 'test-model'
+		ANSWERER_CHAIN: 'openai',
+		ANSWERER_MODEL: 'global-model',
+		OPENAI_API_KEY: 'openai-key'
 	});
-	assert.equal(config.providers[0].baseUrl, 'http://127.0.0.1:9/v1');
-	assert.equal(config.providers[0].apiKey, 'legacy-key');
+
+	assert.deepEqual(config.chain, ['openai']);
+	assert.equal(config.providers.length, 1);
+	assert.equal(config.providers[0].model, 'global-model');
 });
 
 test('resolveProvider：OAuth 只从指定环境变量取 token，且不在预设表里', () => {

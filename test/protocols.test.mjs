@@ -166,7 +166,7 @@ test('gemini.parseResponse：拼接 parts，STOP / MAX_TOKENS 与空 content', (
 	assert.equal(truncated.finishReason, 'MAX_TOKENS');
 });
 
-test('fetchJson：429/5xx/网络错误可重试，401 致命，错误带状态码与响应体前 200 字', async () => {
+test('fetchJson：429/5xx/网络错误与 401/403/404 可切换，400 致命；错误带状态码与响应体前 200 字', async () => {
 	const respond = (body, status) => async () => new Response(body, { status });
 
 	const rateLimited = await fetchJson(
@@ -176,6 +176,7 @@ test('fetchJson：429/5xx/网络错误可重试，401 致命，错误带状态�
 	assert.ok(rateLimited instanceof ProtocolError);
 	assert.equal(rateLimited.status, 429);
 	assert.equal(rateLimited.retryable, true);
+	assert.equal(rateLimited.authFailure, false);
 	assert.match(rateLimited.message, /http_429/);
 	assert.match(rateLimited.message, /rate limited/);
 
@@ -183,12 +184,23 @@ test('fetchJson：429/5xx/网络错误可重试，401 致命，错误带状态�
 		(error) => error
 	);
 	assert.equal(serverError.retryable, true);
+	assert.equal(serverError.authFailure, false);
 
-	const unauthorized = await fetchJson({ url: 'https://x.test', init: {} }, respond('nope', 401)).catch(
+	for (const status of [401, 403, 404]) {
+		const authFailed = await fetchJson({ url: 'https://x.test', init: {} }, respond('nope', status)).catch(
+			(error) => error
+		);
+		assert.equal(authFailed.status, status);
+		assert.equal(authFailed.retryable, true, `${status} 应可切换下一家`);
+		assert.equal(authFailed.authFailure, true, `${status} 应标记为 authFailure`);
+	}
+
+	const badRequest = await fetchJson({ url: 'https://x.test', init: {} }, respond('bad request', 400)).catch(
 		(error) => error
 	);
-	assert.equal(unauthorized.status, 401);
-	assert.equal(unauthorized.retryable, false);
+	assert.equal(badRequest.status, 400);
+	assert.equal(badRequest.retryable, false, '400 是请求体问题，换谁都一样');
+	assert.equal(badRequest.authFailure, false);
 
 	const network = await fetchJson(
 		{ url: 'https://x.test', init: {} },

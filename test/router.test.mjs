@@ -97,25 +97,88 @@ test('路由：第一家 429 → 换第二家，日志记录 provider + 状态�
 	);
 });
 
-test('路由：第一家 401 致命 → 立即抛错，不调用第二家；反复 401 也不会熔断成切换', async () => {
-	const { router, calls } = buildRouter(['first', 'second'], {
-		'first.test': () => new Response('bad key', { status: 401 }),
+test('路由：401/403/404 鉴权失败 → 切下一家，日志 provider_auth_failed（不与 fallback 混淆）', async () => {
+	for (const status of [401, 403, 404]) {
+		const { router, calls, logs } = buildRouter(['first', 'second'], {
+			'first.test': () => new Response('rejected', { status }),
+			'second.test': () => chatResponse('1')
+		});
+
+		const result = await router.ask(singlePrompt(), { type: 'single', optionCount: 4 });
+		assert.equal(result.provider, 'second', `${status} 应该切换下一家`);
+		assert.equal(calls.length, 2, `${status} 后第二家必须被调用`);
+
+		const authLog = logs.find((event) => event.event === 'provider_auth_failed');
+		assert.ok(authLog, `缺少 provider_auth_failed 事件（status=${status}）`);
+		assert.deepEqual(
+			{ provider: authLog.provider, status: authLog.status, next: authLog.next },
+			{ provider: 'first', status, next: 'second' }
+		);
+		assert.equal(
+			logs.some((event) => event.event === 'provider_fallback'),
+			false,
+			'鉴权失败要独立事件，不混进普通 fallback'
+		);
+		assert.equal(logs.some((event) => event.event === 'provider_fatal'), false);
+	}
+});
+
+test('路由：401 计入熔断，连续 3 次后跳过死 key；冷却后恢复', async () => {
+	let clock = 1000;
+	const { router, calls, logs } = buildRouter(
+		['expired', 'healthy'],
+		{
+			'expired.test': () => new Response('bad key', { status: 401 }),
+			'healthy.test': () => chatResponse('1')
+		},
+		{ now: () => clock }
+	);
+
+	for (let i = 0; i < 3; i++) {
+		const result = await router.ask(singlePrompt(), { type: 'single', optionCount: 4 });
+		assert.equal(result.provider, 'healthy');
+	}
+	assert.equal(calls.filter((call) => call.url.includes('expired.test')).length, 3);
+	assert.ok(logs.some((event) => event.event === 'circuit_open' && event.provider === 'expired'));
+
+	// 第 4 次：401 已经把 expired 熔断，直接走 healthy。
+	const fourth = await router.ask(singlePrompt(), { type: 'single', optionCount: 4 });
+	assert.equal(fourth.provider, 'healthy');
+	assert.equal(
+		calls.filter((call) => call.url.includes('expired.test')).length,
+		3,
+		'熔断期内不得再拿死 key 去撞 401'
+	);
+	assert.ok(logs.some((event) => event.event === 'circuit_skip' && event.provider === 'expired'));
+
+	// 冷却 60 秒后放行：expired 会被再试一次。
+	clock += 60_001;
+	const afterCooldown = await router.ask(singlePrompt(), { type: 'single', optionCount: 4 });
+	assert.equal(afterCooldown.provider, 'healthy');
+	assert.equal(calls.filter((call) => call.url.includes('expired.test')).length, 4);
+});
+
+test('路由：400 → 立即抛错，不切下一家，日志 provider_fatal', async () => {
+	const { router, calls, logs } = buildRouter(['first', 'second'], {
+		'first.test': () => new Response('bad request', { status: 400 }),
 		'second.test': () => chatResponse('1')
 	});
 
-	for (let i = 0; i < 4; i++) {
-		await assert.rejects(
-			() => router.ask(singlePrompt(), { type: 'single', optionCount: 4 }),
-			(error) => {
-				assert.ok(error instanceof ProviderError);
-				assert.equal(error.reason, 'provider_error');
-				assert.equal(error.status, 401);
-				return true;
-			}
-		);
-	}
-	assert.equal(calls.filter((call) => call.url.includes('first.test')).length, 4);
-	assert.equal(calls.filter((call) => call.url.includes('second.test')).length, 0, '致命错误不能继续烧别家额度');
+	await assert.rejects(
+		() => router.ask(singlePrompt(), { type: 'single', optionCount: 4 }),
+		(error) => {
+			assert.ok(error instanceof ProviderError);
+			assert.equal(error.reason, 'provider_error');
+			assert.equal(error.status, 400);
+			assert.equal(error.retryable, false);
+			return true;
+		}
+	);
+	assert.equal(calls.length, 1, '400 是请求体问题，换下一家也一样');
+	assert.ok(
+		logs.some((event) => event.event === 'provider_fatal' && event.provider === 'first' && event.status === 400)
+	);
+	assert.equal(logs.some((event) => event.event === 'provider_auth_failed'), false);
 });
 
 test('路由：致命错误经 service 也不重试（retryable=false）', async () => {
@@ -174,6 +237,8 @@ test('路由：全链失败 → ProviderError(reason=provider_error)', async () 
 			assert.ok(error instanceof ProviderError);
 			assert.equal(error.reason, 'provider_error');
 			assert.match(error.message, /all_providers_failed/);
+			assert.match(error.message, /first: 503/, '全链失败信息要带每家的状态码');
+			assert.match(error.message, /second: 502/);
 			return true;
 		}
 	);

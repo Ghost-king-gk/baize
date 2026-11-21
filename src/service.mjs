@@ -70,7 +70,7 @@ export function createService(config) {
 				return await sampleOnce(type, title, options);
 			} catch (error) {
 				if (!(error instanceof InvalidOutputError) && !(error instanceof ProviderError)) throw error;
-				// 路由层标记的致命错误（400/401/403/404）不重试，避免重复烧额度。
+				// 路由层标记的致命错误（400 及其余不可切换的 4xx）不重试，避免重复烧额度。
 				if (error instanceof ProviderError && /** @type {any} */ (error).retryable === false) throw error;
 				if (attempt === 0) firstError = error;
 				lastError = error;

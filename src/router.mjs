@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * 多 provider 路由：按 ANSWERER_CHAIN 顺序尝试，可重试错误换下一家、致命错误立即停。
+ * 多 provider 路由：按 ANSWERER_CHAIN 顺序尝试，可切换错误换下一家、致命错误立即停。
  *
  * 借鉴 cc-switch v4 的本地路由思路：
  * - 供应商是数据（config/providers.json + providers.local.json）；
@@ -114,6 +114,12 @@ export function defaultRouterLog(event) {
 		const status = event.status ?? 'network';
 		const suffix = event.next ? ` -> fallback=${event.next}` : '';
 		console.error(`[baize] provider=${event.provider} status=${status}${suffix}`);
+		return;
+	}
+	if (event.event === 'provider_auth_failed') {
+		// 401/403/404 单独一个事件：便于区分「key 过期」和普通限流/宕机。
+		const suffix = event.next ? ` -> fallback=${event.next}` : '';
+		console.error(`[baize] provider=${event.provider} status=${event.status ?? 'auth'} provider_auth_failed${suffix}`);
 		return;
 	}
 	if (event.event === 'provider_fatal') {
@@ -262,9 +268,10 @@ export function createRouter(config) {
 
 					const status = /** @type {any} */ (error).status ?? null;
 					const retryable = /** @type {any} */ (error).retryable === true;
+					const authFailure = /** @type {any} */ (error).authFailure === true;
 
 					if (!retryable) {
-						// 400/401/403/404 是配置或权限问题：直接抛出，且不计入熔断，
+						// 400 及其余 4xx 是请求体或配置问题：直接抛出，且不计入熔断，
 						// 避免「重试到熔断」后反而切到下一家。
 						log({ event: 'provider_fatal', provider: provider.id, status });
 						const fatal = new ProviderError(`provider ${provider.id} failed: ${/** @type {Error} */ (error).message}`);
@@ -277,8 +284,15 @@ export function createRouter(config) {
 						throw fatal;
 					}
 
+					// 408/429/5xx/网络错误，以及 401/403/404（key 过期、无权限、模型不存在）都切换下一家。
+					// 401/403/404 同样计入熔断：连续 3 次后跳过 60 秒。
 					const tripped = breaker.recordFailure(provider.id);
-					log({ event: 'provider_fallback', provider: provider.id, status, next });
+					log({
+						event: authFailure ? 'provider_auth_failed' : 'provider_fallback',
+						provider: provider.id,
+						status,
+						next
+					});
 					if (tripped) {
 						log({
 							event: 'circuit_open',

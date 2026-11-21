@@ -109,7 +109,7 @@ export function normalizeProvider(id, entry, options = {}) {
 	}
 
 	if (source === 'preset' && Object.prototype.hasOwnProperty.call(entry, 'model')) {
-		throw new Error(`provider 预设 "${id}" 不应写 model：模型只能来自 ANSWERER_MODEL 或 providers.local.json`);
+		throw new Error(`provider 预设 "${id}" 不应写 model：模型只能来自 ANSWERER_MODEL（单 provider）或 providers.local.json 里逐家的 model`);
 	}
 
 	if (typeof entry.baseUrl !== 'string') {
@@ -167,6 +167,35 @@ export function loadProviderTable(options) {
 	const localFile = options.localFile ?? path.join(path.dirname(options.file), 'providers.local.json');
 	const local = readProviderFile(localFile);
 	return { presets, local, providers: mergeProviderTables(presets, local) };
+}
+
+/**
+ * 混合链（长度 > 1）必须逐家指定 model：不同供应商的模型 id 通常不同，
+ * 全局 ANSWERER_MODEL 只适合单 provider。mock 自带 model，不在此列。
+ * 未知 provider 不在这里报错，交给 resolveProvider 给出更准确的提示。
+ * @param {string[]} chain
+ * @param {Record<string, ProviderEntry>} table
+ */
+export function assertMixedChainModels(chain, table) {
+	if (chain.length <= 1) return;
+
+	/** @type {string[]} */
+	const missing = [];
+	for (const id of chain) {
+		if (id === 'mock') continue;
+		const entry = table[id];
+		if (!entry) continue;
+		if (!entry.model) missing.push(id);
+	}
+	if (missing.length === 0) return;
+
+	const fixes = missing
+		.map(
+			(id) =>
+				`provider "${id}" 缺少 model；混合链必须逐家指定。在 config/providers.local.json 里加：\n  { "${id}": { "model": "<该供应商的模型 id>" } }`
+		)
+		.join('\n');
+	throw new Error(`ANSWERER_CHAIN=${chain.join(',')} 包含多个 provider，不能只靠全局 ANSWERER_MODEL。\n${fixes}`);
 }
 
 /**

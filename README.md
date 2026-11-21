@@ -58,7 +58,12 @@ curl -s -X POST 127.0.0.1:8787/answer \
 | `ollama` | openai | `http://127.0.0.1:11434/v1` | 无（null） | 是 |
 | `lmstudio` | openai | `http://127.0.0.1:1234/v1` | 无（null） | 是 |
 
-预设表**绝不写模型 ID**：模型只能来自全局 `ANSWERER_MODEL`，或在 `providers.local.json` 里按 provider 覆盖（不同家的模型名通常不同）。
+预设表**绝不写模型 ID**：模型来自全局 `ANSWERER_MODEL`（只适用于单 provider 链），或在 `providers.local.json` 里按 provider 写 `model`。**混合链（`ANSWERER_CHAIN` 多于一家）必须逐家指定 `model`**，否则启动即拒绝，不会拖到第一次请求才发现第二家 404/400：
+
+```
+provider "deepseek" 缺少 model；混合链必须逐家指定。在 config/providers.local.json 里加：
+  { "deepseek": { "model": "<该供应商的模型 id>" } }
+```
 
 `ANSWERER_CHAIN` 是逗号分隔的 provider id，按顺序尝试；未设置时退回 `ANSWERER_PROVIDER`（兼容旧的单 provider 配置）：
 
@@ -72,14 +77,16 @@ ANSWERER_CHAIN=openai,deepseek node src/server.mjs
 | 情况 | 行为 |
 | --- | --- |
 | 网络错误、超时、HTTP 408 / 429 / 5xx、响应不是 JSON | 记一次失败，换下一家 |
-| HTTP 400 / 401 / 403 / 404 及其余 4xx | **立即抛出**，不继续烧别家额度 |
+| HTTP 401 / 403 / 404（key 过期、无权限、模型/路径不存在） | 同样换下一家，日志打独立的 `provider_auth_failed`；也计入熔断 |
+| HTTP 400 及其余 4xx | **立即抛出**，不继续烧别家额度 |
 | HTTP 2xx 但内容截断 / 空输出 / 序号非法 | 不切下一家（供应商已经应答），按 `invalid_output` 重试一次 |
-| 单 provider 连续失败 3 次 | 进程内熔断 60 秒，期间直接跳过；冷却后自动放行 |
+| 单 provider 连续失败 3 次（含 401/403/404） | 进程内熔断 60 秒，期间直接跳过；冷却后自动放行 |
 
 切换日志只打印 provider id + 状态码，不打印 key / 请求体：
 
 ```
 [baize] provider=openai status=429 -> fallback=deepseek
+[baize] provider=openai status=401 provider_auth_failed -> fallback=deepseek
 [baize] provider=deepseek status=network -> fallback=mock
 [baize] provider=openai circuit=open
 ```
@@ -266,7 +273,7 @@ OCS 的匹配器对答案字符串有硬性要求，格式错了就是「搜不�
 | `ANSWERER_CHAIN` | 空 | 故障转移链，逗号分隔的 provider id（如 `openai,deepseek,ollama`）；优先于 `ANSWERER_PROVIDER` |
 | `ANSWERER_PROVIDER` | `openai` | 单 provider 兼容写法；`mock` 不联网，返回预置答案 |
 | `ANSWERER_PROVIDERS_FILE` | `config/providers.json` | 供应商预设表路径；同目录的 `providers.local.json` 会自动合并 |
-| `ANSWERER_MODEL` | 空 | 全局模型名；provider 条目里的 `model` 优先 |
+| `ANSWERER_MODEL` | 空 | 单 provider 链的全局模型名；混合链必须在 `providers.local.json` 里逐家写 `model` |
 | `ANSWERER_BASE_URL` | 空 | 旧配置：只覆盖链上第一家的 baseUrl |
 | `ANSWERER_API_KEY` | 空 | 旧配置：只覆盖链上第一家的 key；其余 provider 用各自的 `keyEnv` |
 | `ANSWERER_PORT` | `8787` | 监听端口（地址固定 `127.0.0.1`，不可改） |
@@ -339,7 +346,7 @@ baize/
 │   ├── providers.mjs   预设表校验、providers.local.json 合并、key 解析
 │   ├── oauth.mjs       订阅 OAuth 凭据读取、JWT payload 解析、Claude Code 指纹常量
 │   ├── protocols/      openai / anthropic / gemini / responses 四种线格式 + 共用 HTTP
-│   ├── router.mjs      故障转移链、可重试错误分类、进程内熔断
+│   ├── router.mjs      故障转移链、可切换/致命错误分类、进程内熔断
 │   ├── provider.mjs    AnswerProvider：openai（单家兼容） / mock
 │   ├── service.mjs     自洽采样、多数票、重试、弃权、埋点
 │   ├── server.mjs      node:http + CORS + 路由

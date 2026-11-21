@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadProviderTable, resolveProvider } from './providers.mjs';
+import { assertMixedChainModels, loadProviderTable, resolveProvider } from './providers.mjs';
 
 /** 仓库根目录（src/ 的上一级）。 */
 export const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -104,6 +104,10 @@ export function loadConfig(env = process.env) {
 		if (lower === 'mock' || table[lower]) return lower;
 		return id;
 	});
+
+	// 混合链必须逐家指定 model：全局 ANSWERER_MODEL 无法同时适配不同供应商。
+	// 在监听端口之前就拒绝启动，避免用户到第一次请求才发现第二家 404/400。
+	assertMixedChainModels(chain, table);
 
 	// 旧的 ANSWERER_BASE_URL / ANSWERER_API_KEY 继续生效：只覆盖链上第一家。
 	const providers = chain.map((id, index) =>

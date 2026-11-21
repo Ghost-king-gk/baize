@@ -213,7 +213,15 @@ export function start(env = process.env) {
 
 const entry = process.argv[1] ? path.resolve(process.argv[1]) : '';
 if (entry === fileURLToPath(import.meta.url)) {
-	const server = start();
+	/** @type {ReturnType<typeof start>} */
+	let server;
+	try {
+		server = start();
+	} catch (error) {
+		// 配置错误（缺 key、混合链缺 model 等）在监听端口之前就拒绝启动。
+		console.error(`[baize] 启动失败: ${/** @type {Error} */ (error)?.message ?? error}`);
+		process.exit(1);
+	}
 
 	const shutdown = () => {
 		server.close(() => process.exit(0));
