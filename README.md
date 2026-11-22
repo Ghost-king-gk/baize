@@ -1,23 +1,23 @@
-&lt;div align=&quot;center&quot;&gt;
+<div align="center">
 
-&lt;img src=&quot;assets/banner.svg&quot; alt=&quot;baize · 白泽&quot; width=&quot;860&quot;&gt;
+<img src="assets/banner.svg" alt="baize · 白泽" width="860">
 
 <br>
 
-&lt;a href=&quot;https://github.com/Ghost-king-gk/baize/stargazers&quot;&gt;&lt;img src=&quot;https://img.shields.io/github/stars/Ghost-king-gk/baize?style=flat-square&amp;color=35C2A8&amp;label=stars&quot; alt=&quot;stars&quot;&gt;&lt;/a&gt;
-&lt;img src=&quot;https://img.shields.io/badge/license-MIT-35C2A8?style=flat-square&quot; alt=&quot;license&quot;&gt;
-&lt;img src=&quot;https://img.shields.io/badge/node-%E2%89%A522-4EA1FF?style=flat-square&quot; alt=&quot;node&quot;&gt;
-&lt;img src=&quot;https://img.shields.io/badge/dependencies-0-8B7CF6?style=flat-square&quot; alt=&quot;dependencies&quot;&gt;
-&lt;img src=&quot;https://img.shields.io/badge/tests-129%20passing-35C2A8?style=flat-square&quot; alt=&quot;tests&quot;&gt;
-&lt;img src=&quot;https://img.shields.io/badge/ocsjs-5.4.2-8B929C?style=flat-square&quot; alt=&quot;ocsjs&quot;&gt;
+<a href="https://github.com/Ghost-king-gk/baize/stargazers"><img src="https://img.shields.io/github/stars/Ghost-king-gk/baize?style=flat-square&color=35C2A8&label=stars" alt="stars"></a>
+<img src="https://img.shields.io/badge/license-MIT-35C2A8?style=flat-square" alt="license">
+<img src="https://img.shields.io/badge/node-%E2%89%A522-4EA1FF?style=flat-square" alt="node">
+<img src="https://img.shields.io/badge/dependencies-0-8B7CF6?style=flat-square" alt="dependencies">
+<img src="https://img.shields.io/badge/tests-129%20passing-35C2A8?style=flat-square" alt="tests">
+<img src="https://img.shields.io/badge/ocsjs-5.4.2-8B929C?style=flat-square" alt="ocsjs">
 
 <br><br>
 
 **把 OCS 的「题库协议」，翻译成任意大模型的可靠答案。**
 
-&lt;sub&gt;零运行时依赖 · 本地回环服务 · 多模型故障转移 · 单文件可视化看板 · 支持 OpenCode Go 与 Claude / ChatGPT 订阅&lt;/sub&gt;
+<sub>零运行时依赖 · 本地回环服务 · 多模型故障转移 · 单文件可视化看板 · 支持 OpenCode Go 与 Claude / ChatGPT 订阅</sub>
 
-&lt;/div&gt;
+</div>
 
 ---
 
@@ -55,8 +55,8 @@ flowchart LR
 
 按你的运行环境选择一种方式：
 
-&lt;details open&gt;
-&lt;summary&gt;&lt;b&gt;方式 A：Docker（推荐）&lt;/b&gt;&lt;/summary&gt;
+<details open>
+<summary><b>方式 A：Docker（推荐）</b></summary>
 
 ```bash
 git clone https://github.com/Ghost-king-gk/baize.git && cd baize
@@ -64,11 +64,11 @@ cp .env.example .env          # 填入 OPENCODE_GO_API_KEY 或其他供应商密
 docker compose up -d --build
 ```
 
-宿主机仅暴露 `127.0.0.1:8787`。更多细节见 [docs/docker.md](https://www.google.com/search?q=docs/docker.md)。
-&lt;/details&gt;
+宿主机仅暴露 `127.0.0.1:8787`。更多细节见 [docs/docker.md](docs/docker.md)。
+</details>
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;方式 B：Windows（免安装 Node）&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>方式 B：Windows（免安装 Node）</b></summary>
 
 ```powershell
 git clone https://github.com/Ghost-king-gk/baize.git; cd baize
@@ -78,11 +78,11 @@ notepad .env                  # 填入密钥
 scripts\start.bat
 ```
 
-`win-portable.ps1` 会将便携版 `node.exe` 下载至 `runtime\` 目录，无需在系统中全局安装 Node。详见 [docs/windows.md](https://www.google.com/search?q=docs/windows.md)。
-&lt;/details&gt;
+`win-portable.ps1` 会将便携版 `node.exe` 下载至 `runtime\` 目录，无需在系统中全局安装 Node。详见 [docs/windows.md](docs/windows.md)。
+</details>
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;方式 C：Linux / macOS（源码运行）&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>方式 C：Linux / macOS（源码运行）</b></summary>
 
 要求 **Node ≥ 22**：
 
@@ -91,7 +91,7 @@ git clone https://github.com/Ghost-king-gk/baize.git && cd baize
 cp .env.example .env          # 填入密钥
 node src/server.mjs
 ```
-&lt;/details&gt;
+</details>
 
 终端输出以下日志即表示启动成功：
 
@@ -113,7 +113,7 @@ curl -s -X POST 127.0.0.1:8787/answer \
 
 ### 3. 接入 OCS
 
-打开任意网课页面 → 展开 OCS 面板 → `⚙️ 全局设置` → `题库配置` → 选择「自定义」→ 粘贴 [contract/answerer.json](https://www.google.com/search?q=contract/answerer.json)：
+打开任意网课页面 → 展开 OCS 面板 → `⚙️ 全局设置` → `题库配置` → 选择「自定义」→ 粘贴 [contract/answerer.json](contract/answerer.json)：
 
 ```json
 [
@@ -138,7 +138,7 @@ curl -s -X POST 127.0.0.1:8787/answer \
 
 ## 多模型路由与故障转移
 
-供应商配置以数据驱动：内置预设位于 [config/providers.json](https://www.google.com/search?q=config/providers.json)，自定义覆盖可写在同目录的 `config/providers.local.json`（已加入 `.gitignore`）。
+供应商配置以数据驱动：内置预设位于 [config/providers.json](config/providers.json)，自定义覆盖可写在同目录的 `config/providers.local.json`（已加入 `.gitignore`）。
 
 | Provider ID | 协议 | 认证方式 | 所需凭据 |
 | --- | --- | --- | --- |
@@ -208,8 +208,8 @@ sequenceDiagram
 [baize] provider=openai circuit=open
 ```
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;进阶：自定义 Provider 与 Claude / Codex 订阅 OAuth&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>进阶：自定义 Provider 与 Claude / Codex 订阅 OAuth</b></summary>
 
 #### 自定义 Provider
 
@@ -235,15 +235,15 @@ sequenceDiagram
 
 > ⚠️ **风险提示**：此类 Token 隶属于官方订阅客户端，第三方调用可能违反服务条款或随时被吊销。订阅模式目前**未在真实账号上完成联调**。
 
-&lt;/details&gt;
+</details>
 
 ---
 
 ## 看板与用量监控
 
-&lt;img src=&quot;assets/preview.svg&quot; alt=&quot;看板预览&quot; width=&quot;880&quot;&gt;
+<img src="assets/preview.svg" alt="看板预览" width="880">
 
-> &lt;sub&gt;上图由内置看板生成器渲染（示例数据：626 题 / 3 个模型 / 5 天）。&lt;/sub&gt;
+> <sub>上图由内置看板生成器渲染（示例数据：626 题 / 3 个模型 / 5 天）。</sub>
 
 服务运行期间自带轻量级只读 Web 界面与状态接口，同时提供命令行工具用于离线生成报表：
 
@@ -270,15 +270,15 @@ node tools/dashboard.mjs   # 生成独立单文件 dashboard.html，浏览器直
 
 日常使用无需关心以下细节；如需二次开发、排查异常或审计行为，可按需展开查阅。
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;1. OCS 答案格式与匹配契约&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>1. OCS 答案格式与匹配契约</b></summary>
 
 OCS 的答题器依赖**字符串匹配**而非语义理解，返回格式直接决定能否正确选中选项：
 
 | 题型 | 期望返回格式 | OCS 源码依据与注意事项 |
 | --- | --- | --- |
 | `single` | 选中选项的**原文**（保留 `A.` 等前缀） | `resolvers/single.ts:27` 先归一化匹配再计算相似度；两侧均经过 `removeRedundant`（`utils/string.ts:250`），前缀会对称剥离。 |
-| `multiple` | 多个选项原文，以 `#` 连接 | `resolvers/multiple.ts:42`；OCS 支持的分隔符全集为 `['===','#','---','###','|',';','；']`（`worker/utils.ts:139`）。 |
+| `multiple` | 多个选项原文，以 `#` 连接 | `resolvers/multiple.ts:42`；OCS 支持的分隔符全集为 `['===','#','---','###','\|',';','；']`（`worker/utils.ts:139`）。 |
 | `judgement` | **词表 Token**（如 `对/错/正确/错误/√/×/true/1`），**严禁**带 `A.` 前缀 | `resolvers/judgement.ts:9-29` 定义词表，`:40` 执行整串相等比对；`A. 正确` 归一化后变为 `a正确` 导致失配。 |
 | `completion` | 按空位顺序以 `#` 连接 | `resolvers/completion.ts:19` 调用 `splitAnswer` 切分后依次填入。 |
 
@@ -288,19 +288,19 @@ OCS 的答题器依赖**字符串匹配**而非语义理解，返回格式直接
 - **判断题 Token 必须取自选项自身**：若页面选项为 `√`，返回 `正确` 无法命中。
 - **填空题防冲突**：若生成答案本身包含 `#` 或 `===` 会破坏切分逻辑，此时直接弃权。
 
-&lt;/details&gt;
+</details>
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;2. 模型调用与自洽采样（Self-Consistency）&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>2. 模型调用与自洽采样（Self-Consistency）</b></summary>
 
 - **确定性参数**：统一采用 `temperature: 0`、非流式、无工具调用；`max_tokens` 选择题设为 `256`、填空题设为 `1200`（推理模型的 thinking 过程会消耗输出预算，实测 `16` 时会返回空串）。
 - **去位置偏置投票**：选项以 `1) 2) 3)` 编号展示，Prompt 仅要求输出序号（如 `3` 或 `1,3`）。同一题通过 `Promise.all` 并行采样 **K 次**，每次**独立随机打乱选项顺序**，将输出映射回原始下标后取多数票。
 - **置信度与重试**：未达成过半共识返回 `low_confidence`；单次样本解析失败会就地重试一次，仍失败则返回 `invalid_output`。当供应商支持返回 `logprobs` 时，额外取 Top-2 概率差作为 `margin` 参与判定。
 
-&lt;/details&gt;
+</details>
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;3. HTTP 接口与错误码（reason）&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>3. HTTP 接口与错误码（reason）</b></summary>
 
 请求体字段与 OCS 的 `env` 结构保持一致（`answer.wrapper.handler.ts:46-66`），支持：`title`、`type`、`options`（`\n` 分隔字符串）、`images`（base64 数组）、`suggestion_title`、`suggestion_options`。
 
@@ -322,10 +322,10 @@ OCS 的答题器依赖**字符串匹配**而非语义理解，返回格式直接
 
 > 所有业务层面的主动弃权均返回 HTTP `200`（供 OCS 正常按「未搜到」处理），仅请求格式非法时返回 `400`。
 
-&lt;/details&gt;
+</details>
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;4. 环境变量一览&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>4. 环境变量一览</b></summary>
 
 | 变量名 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -346,10 +346,10 @@ OCS 的答题器依赖**字符串匹配**而非语义理解，返回格式直接
 
 服务严格限定只读取 `ANSWERER_*`、预设表中 `keyEnv` 声明的变量以及上述三个 OAuth 变量，不会自动拾取宿主机上的其他密钥。
 
-&lt;/details&gt;
+</details>
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;5. 埋点日志与费用口径&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>5. 埋点日志与费用口径</b></summary>
 
 每次答题以单行 JSONL 追加写入 `logs/answers.jsonl`（已加入 `.gitignore`），写入失败不会阻塞答题主流程：
 
@@ -375,10 +375,10 @@ OCS 的答题器依赖**字符串匹配**而非语义理解，返回格式直接
 - **严格累加口径**：K 次自洽采样每次均产生真实计费，日志按次累加；只要任一样本缺失某字段，该项汇总记为 `null`（部分已知不等于完整账单）。
 - **隐私脱敏**：日志仅记录题干长度与 SHA-256 前 16 位，**不保存题干原文**；填空题的 `votes` 仅统计各候选样本的出现频次。
 
-&lt;/details&gt;
+</details>
 
-&lt;details&gt;
-&lt;summary&gt;&lt;b&gt;6. 测试与评测&lt;/b&gt;&lt;/summary&gt;
+<details>
+<summary><b>6. 测试与评测</b></summary>
 
 ```bash
 node --test                        # 运行全部 129 项测试（格式化 / Prompt / 协议 / 路由 / 配置 / 服务 / HTTP / 管理页 / 看板）
@@ -387,7 +387,7 @@ node --test eval/format.test.mjs   # 单独运行真实用例格式评测（已�
 
 `eval/cases.json` 逐字节复用自 ocsjs 仓库的 `tests/cases.json`（commit `09628b7`，MIT License，Copyright (c) 2022 enncy，SHA-256 `12feb6c6...`），测试套件内置防篡改校验。159 个用例中 137 个为可作答用例，其余 22 个 `expect: []` 为本身无解的负例。
 
-&lt;/details&gt;
+</details>
 
 ---
 
@@ -441,8 +441,8 @@ node --test eval/format.test.mjs   # 单独运行真实用例格式评测（已�
 
 ---
 
-&lt;div align=&quot;center&quot;&gt;
-&lt;sub&gt;
+<div align="center">
+<sub>
 
 **免责声明**：本项目仅供学习与自动化技术研究，请严格遵守所在学校及平台的使用条款。作者不提供任何绕过平台风控的能力，亦不对使用后果承担责任。
 
@@ -454,5 +454,5 @@ MIT License · 兼容 ocsjs 5.4.2 @ 09628b7 · [上游仓库](https://github.com
 
 名出《山海经》：「白泽知万物之情」——知万物，且能言人语。
 
-&lt;/sub&gt;
-&lt;/div&gt;
+</sub>
+</div>
